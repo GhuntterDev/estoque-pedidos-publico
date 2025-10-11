@@ -1,0 +1,34 @@
+# Logs
+*.log
+pedidos_debug.log
+
+# Base de dados local
+*.db
+
+# Arquivos temporários
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Configurações locais
+.env
+config_local.py
+
+# Streamlit
+.streamlit/config.toml
+.streamlit/secrets.toml

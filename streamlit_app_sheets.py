@@ -128,14 +128,14 @@ def get_worksheet(name):
 def get_current_stock_for_orders():
     """Obtém estoque atual diretamente da aba 'Saldos' do Google Sheets"""
     try:
-        # Obter dados diretamente da aba 'Saldos'
-        ws_saldos = get_worksheet("Saldos")
+        # Obter dados diretamente da aba 'Saldo'
+        ws_saldos = get_worksheet("Saldo")
         if not ws_saldos:
-            log("❌ Aba 'Saldos' não encontrada")
+            log("❌ Aba 'Saldo' não encontrada")
             return []
         
         records = ws_saldos.get_all_records()
-        log(f"✅ {len(records)} registros encontrados na aba 'Saldos'")
+        log(f"✅ {len(records)} registros encontrados na aba 'Saldo'")
         
         stock_list = []
         for record in records:
@@ -170,11 +170,11 @@ def get_current_stock_for_orders():
                 }
                 stock_list.append(stock_item)
         
-        log(f"✅ Estoque carregado da aba 'Saldos': {len(stock_list)} produtos")
+        log(f"✅ Estoque carregado da aba 'Saldo': {len(stock_list)} produtos")
         return stock_list
         
     except Exception as e:
-        log(f"❌ ERRO ao carregar estoque da aba 'Saldos': {e}")
+        log(f"❌ ERRO ao carregar estoque da aba 'Saldo': {e}")
         import traceback
         log(f"   Traceback: {traceback.format_exc()}")
         return []

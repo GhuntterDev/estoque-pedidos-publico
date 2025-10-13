@@ -126,93 +126,55 @@ def get_worksheet(name):
         return None
 
 def get_current_stock_for_orders():
-    """Calcula estoque atual baseado em entradas e saídas do Google Sheets"""
+    """Obtém estoque atual diretamente da aba 'Saldos' do Google Sheets"""
     try:
-        # Obter todas as entradas
-        ws_in = get_worksheet("Entrada")
-        entries = []
-        if ws_in:
-            entries = ws_in.get_all_records()
-            log(f"✅ {len(entries)} entradas encontradas")
+        # Obter dados diretamente da aba 'Saldos'
+        ws_saldos = get_worksheet("Saldos")
+        if not ws_saldos:
+            log("❌ Aba 'Saldos' não encontrada")
+            return []
         
-        # Obter todas as saídas
-        ws_out = get_worksheet("Saídas")
-        dispatches = []
-        if ws_out:
-            dispatches = ws_out.get_all_records()
-            log(f"✅ {len(dispatches)} saídas encontradas")
+        records = ws_saldos.get_all_records()
+        log(f"✅ {len(records)} registros encontrados na aba 'Saldos'")
         
-        # Calcular estoque por produto (agrupado por EAN)
-        stock_dict = {}
-        
-        # Processar entradas
-        for entry in entries:
-            # Tentar diferentes formatos de chave
-            ref = entry.get('Referencia') or entry.get('Referência') or entry.get('reference') or ''
-            name = entry.get('Nome') or entry.get('name') or entry.get('product_name') or ''
-            ean = entry.get('Código de Barras') or entry.get('EAN') or entry.get('ean') or ''
-            qty = entry.get('Quantidade') or entry.get('quantity') or 0
-            volumes = entry.get('Volumes') or entry.get('volumes') or 0
-            sector = entry.get('Setor') or entry.get('sector') or entry.get('sector_name') or ''
+        stock_list = []
+        for record in records:
+            # Extrair dados da aba Saldos
+            fornecedor = record.get('Fornecedor') or record.get('fornecedor') or ''
+            referencia = record.get('Referencia') or record.get('Referência') or record.get('referencia') or ''
+            ean = record.get('Código de Barras') or record.get('EAN') or record.get('ean') or ''
+            nome = record.get('Nome') or record.get('nome') or record.get('product_name') or ''
+            setor = record.get('Setor') or record.get('setor') or record.get('sector') or ''
             
-            # Converter quantidade para número
-            try:
-                qty = float(qty) if qty else 0
-                volumes = float(volumes) if volumes else 0
-            except:
-                qty = 0
-                volumes = 0
+            # Tentar encontrar a coluna de estoque (pode ter diferentes nomes)
+            estoque_atual = 0
+            for key in record.keys():
+                if key.lower() in ['estoque', 'estoque atual', 'quantidade', 'saldo', 'qtd'] or key.isdigit():
+                    try:
+                        estoque_atual = int(float(record[key])) if record[key] else 0
+                        break
+                    except:
+                        continue
             
-            # Usar EAN como chave principal (para agrupar produtos iguais)
-            key = ean if ean else (ref if ref else name)
-            if not key:
-                continue
-            
-            if key not in stock_dict:
-                stock_dict[key] = {
-                    'ID': '',  # Será preenchido depois
+            # Só adicionar se tem pelo menos um identificador (EAN, referência ou nome)
+            if ean or referencia or nome:
+                stock_item = {
+                    'ID': '',  # Não usado no sistema de pedidos
                     'EAN': ean,
-                    'Referência': ref,
-                    'Produto': name,
-                    'Setor': sector,
-                    'Quantidade': 0,  # Quantidade total calculada
+                    'Referência': referencia,
+                    'Produto': nome,
+                    'Setor': setor,
+                    'Quantidade': estoque_atual,
+                    'Fornecedor': fornecedor,
                     'Última Atualização': now_br().strftime("%d/%m/%Y %H:%M")
                 }
-            
-            # Somar quantidade (volumes * quantidade por volume)
-            total = volumes * qty if volumes > 0 else qty
-            stock_dict[key]['Quantidade'] += total
+                stock_list.append(stock_item)
         
-        # Processar saídas (subtrair)
-        for dispatch in dispatches:
-            # Tentar diferentes formatos de chave
-            ref = dispatch.get('Referencia') or dispatch.get('Referência') or dispatch.get('reference') or ''
-            name = dispatch.get('Nome') or dispatch.get('name') or dispatch.get('product_name') or ''
-            ean = dispatch.get('Código de Barras') or dispatch.get('EAN') or dispatch.get('ean') or ''
-            qty = dispatch.get('Quantidade') or dispatch.get('quantity') or 0
-            
-            # Converter quantidade para número
-            try:
-                qty = float(qty) if qty else 0
-            except:
-                qty = 0
-            
-            # Usar EAN como chave principal (mesma lógica das entradas)
-            key = ean if ean else (ref if ref else name)
-            if not key:
-                continue
-            
-            if key in stock_dict:
-                stock_dict[key]['Quantidade'] -= qty
-        
-        # Converter para lista
-        stock_list = list(stock_dict.values())
-        log(f"✅ Estoque calculado: {len(stock_list)} produtos")
-        
+        log(f"✅ Estoque carregado da aba 'Saldos': {len(stock_list)} produtos")
         return stock_list
         
     except Exception as e:
-        log(f"❌ ERRO ao calcular estoque: {e}")
+        log(f"❌ ERRO ao carregar estoque da aba 'Saldos': {e}")
         import traceback
         log(f"   Traceback: {traceback.format_exc()}")
         return []

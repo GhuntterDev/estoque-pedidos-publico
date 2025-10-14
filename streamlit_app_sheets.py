@@ -189,25 +189,36 @@ def get_current_stock_for_orders():
         return []
 
 def create_order_in_sheets(store, products_data):
-    """Cria pedido no Google Sheets"""
+    """Cria pedido no Google Sheets com ordem correta das colunas"""
     try:
         ws = get_worksheet(WS_ORDERS)
         if ws:
             now = now_br()
+            # Obter dados do usuário logado
+            user_data = st.session_state.get('user_data', {})
+            responsavel = user_data.get('login', 'Sistema')
+            
             for product in products_data:
+                # Ordem correta das colunas conforme especificado:
+                # 1: Data/hora, 2: Responsável, 3: Referência, 4: Código de Barras, 
+                # 5: Produto, 6: Quantidade, 7: Loja, 8: Setor, 9: Status, 
+                # 10: Finalizado em, 11: Responsável Saída, 12: Obs
                 row = [
-                    len(ws.get_all_values()) + 1,  # ID
-                    now.strftime("%d/%m/%Y"),      # Data
-                    now.strftime("%H:%M:%S"),      # Hora
-                    store,                         # Loja
-                    product['reference'],          # Referência
-                    product['name'],               # Nome
-                    product['quantity'],           # Quantidade
-                    product['sector'],             # Setor
-                    "Pendente"                     # Status
+                    now.strftime("%d/%m/%Y %H:%M:%S"),  # 1: Data/hora junto
+                    responsavel,                        # 2: Responsável
+                    product.get('reference', ''),       # 3: Referência
+                    product.get('ean', ''),             # 4: Código de Barras
+                    product.get('product_name', ''),    # 5: Produto
+                    product.get('quantity', 0),         # 6: Quantidade
+                    store,                              # 7: Loja
+                    product.get('sector', ''),          # 8: Setor
+                    "Pendente",                         # 9: Status
+                    "",                                 # 10: Finalizado em (vazio para pendente)
+                    "",                                 # 11: Responsável Saída (vazio para pendente)
+                    ""                                  # 12: Obs (vazio)
                 ]
                 ws.append_row(row)
-            log(f"✅ Pedido criado no Google Sheets para {store}")
+            log(f"✅ Pedido criado no Google Sheets para {store} - {len(products_data)} itens")
             return True
     except Exception as e:
         log(f"❌ ERRO ao criar pedido: {e}")

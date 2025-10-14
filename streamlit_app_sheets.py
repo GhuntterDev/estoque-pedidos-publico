@@ -892,10 +892,10 @@ if page == "Meus Pedidos":
                 if 'Produto' in df_orders.columns:
                     search_term = st.text_input("Buscar Produto", placeholder="Nome, EAN ou referência")
                     if search_term:
-                        # Buscar em produto, EAN e referência
-                        mask = (df_orders["Produto"].str.contains(search_term, case=False, na=False) |
-                               df_orders["EAN"].str.contains(search_term, case=False, na=False) |
-                               df_orders["Referência"].str.contains(search_term, case=False, na=False))
+                        # Buscar em produto, EAN e referência - converter para string primeiro
+                        mask = (df_orders["Produto"].astype(str).str.contains(search_term, case=False, na=False) |
+                               df_orders["EAN"].astype(str).str.contains(search_term, case=False, na=False) |
+                               df_orders["Referência"].astype(str).str.contains(search_term, case=False, na=False))
                         df_orders = df_orders[mask]
             
             with col3:

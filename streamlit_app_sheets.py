@@ -844,7 +844,24 @@ if page == "Meus Pedidos":
     st.header("📋 Meus Pedidos")
     
     try:
-        orders_data = get_orders_by_store(st.session_state.user_data['store'])
+        # Obter todos os pedidos e filtrar pelo usuário logado
+        user_login = st.session_state.user_data.get('login', '')
+        user_store = st.session_state.user_data.get('store', '')
+        
+        log(f"🔍 Buscando pedidos para usuário: {user_login}, loja: {user_store}")
+        
+        all_orders = get_all_orders()
+        # Filtrar por responsável (usuário logado) ou por loja
+        orders_data = []
+        for order in all_orders:
+            order_responsavel = order.get('Responsável', '').strip()
+            order_loja = order.get('Loja', '').strip()
+            
+            # Se o responsável for o usuário logado OU se a loja for a mesma
+            if (order_responsavel == user_login) or (order_loja == user_store):
+                orders_data.append(order)
+        
+        log(f"📋 Pedidos encontrados para {user_login}: {len(orders_data)}")
         
         if orders_data:
             # Criar DataFrame
@@ -867,18 +884,18 @@ if page == "Meus Pedidos":
                         df_orders = df_orders[df_orders["Produto"].str.contains(search_term, case=False, na=False)]
             
             with col3:
-                if 'Criado em' in df_orders.columns:
+                if 'Data/Hora' in df_orders.columns:
                     date_filter = st.date_input("Filtrar por Data", value=dt.date.today())
                     # Filtrar por data (formato DD/MM/YYYY HH:MM:SS)
-                    df_orders['Data'] = pd.to_datetime(df_orders['Criado em'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
+                    df_orders['Data'] = pd.to_datetime(df_orders['Data/Hora'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
                     df_orders = df_orders[df_orders['Data'].dt.date == date_filter]
             
             # Mostrar resultados
             st.subheader(f"Pedidos ({len(df_orders)} itens)")
             
             if not df_orders.empty:
-                # Remover coluna Data temporária
-                display_columns = [col for col in df_orders.columns if col != 'Data']
+                # Remover colunas desnecessárias (Data temporária e Responsável)
+                display_columns = [col for col in df_orders.columns if col not in ['Data', 'Responsável']]
                 st.dataframe(df_orders[display_columns], use_container_width=True)
                 
                 # Estatísticas

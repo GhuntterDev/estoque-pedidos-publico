@@ -294,11 +294,12 @@ def authenticate_user(username, password):
         for i, record in enumerate(records):
             log(f"📋 Registro {i+1}: {record}")
             # Aceitar tanto maiúscula quanto minúscula nos nomes das colunas
-            login = (record.get('Login', '') or record.get('login', '')).strip()
-            senha = (record.get('Senha', '') or record.get('senha', '')).strip()
-            permissao = (record.get('Permissão', '') or record.get('permissão', '') or record.get('Permissao', '') or record.get('permissao', '')).strip()
-            loja = (record.get('Loja', '') or record.get('loja', '')).strip()
-            app = (record.get('App', '') or record.get('app', '')).strip()
+            # Converter para string antes de usar strip() para evitar erro com números
+            login = str(record.get('Login', '') or record.get('login', '') or '').strip()
+            senha = str(record.get('Senha', '') or record.get('senha', '') or '').strip()
+            permissao = str(record.get('Permissão', '') or record.get('permissão', '') or record.get('Permissao', '') or record.get('permissao', '') or '').strip()
+            loja = str(record.get('Loja', '') or record.get('loja', '') or '').strip()
+            app = str(record.get('App', '') or record.get('app', '') or '').strip()
             
             # Verificar se é o usuário correto
             if login.lower() == username.lower():

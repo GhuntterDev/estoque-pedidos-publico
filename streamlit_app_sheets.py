@@ -443,6 +443,31 @@ if page == "Estoque Disponível":
             # Criar DataFrame
             df_stock = pd.DataFrame(stock_data)
             
+            # Estatísticas do estoque (antes dos filtros)
+            if not df_stock.empty:
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    total_items = len(df_stock)
+                    st.metric("Total de Itens", total_items)
+                
+                with col2:
+                    if 'Quantidade' in df_stock.columns:
+                        total_quantity = df_stock["Quantidade"].sum()
+                        st.metric("Quantidade Total", total_quantity)
+                
+                with col3:
+                    if 'Quantidade' in df_stock.columns:
+                        low_stock = len(df_stock[df_stock["Quantidade"] < 10])
+                        st.metric("Estoque Baixo (<10)", low_stock)
+                
+                with col4:
+                    if 'Setor' in df_stock.columns:
+                        sectors_count = df_stock["Setor"].nunique()
+                        st.metric("Setores", sectors_count)
+                
+                st.markdown("---")
+            
             # Filtros
             col1, col2, col3 = st.columns(3)
             
@@ -473,79 +498,59 @@ if page == "Estoque Disponível":
                 if 'carrinho' not in st.session_state:
                     st.session_state.carrinho = {}
                 
-                # Mostrar produtos com checkboxes para carrinho
-                for idx, row in df_stock.iterrows():
-                    col1, col2, col3, col4, col5 = st.columns([1, 3, 2, 2, 2])
+                # Container com scroll para a listagem de produtos
+                with st.container():
+                    # Mostrar produtos com checkboxes para carrinho
+                    for idx, row in df_stock.iterrows():
+                        col1, col2, col3, col4, col5 = st.columns([1, 3, 2, 2, 2])
                     
-                    with col1:
-                        # Checkbox para adicionar ao carrinho
-                        product_key = f"{row.get('EAN', '')}_{idx}"
-                        adicionar = st.checkbox("🛒", key=f"add_{product_key}", 
-                                              value=product_key in st.session_state.carrinho)
+                        with col1:
+                            # Checkbox para adicionar ao carrinho
+                            product_key = f"{row.get('EAN', '')}_{idx}"
+                            adicionar = st.checkbox("🛒", key=f"add_{product_key}", 
+                                                  value=product_key in st.session_state.carrinho)
+                            
+                            if adicionar and product_key not in st.session_state.carrinho:
+                                # Adicionar ao carrinho
+                                st.session_state.carrinho[product_key] = {
+                                    'EAN': row.get('EAN', ''),
+                                    'Referência': row.get('Referência', ''),
+                                    'Produto': row.get('Produto', ''),
+                                    'Setor': row.get('Setor', ''),
+                                    'Quantidade': row.get('Quantidade', 0),
+                                    'Fornecedor': row.get('Fornecedor', ''),
+                                    'qty_pedido': 1
+                                }
+                            elif not adicionar and product_key in st.session_state.carrinho:
+                                # Remover do carrinho
+                                del st.session_state.carrinho[product_key]
                         
-                        if adicionar and product_key not in st.session_state.carrinho:
-                            # Adicionar ao carrinho
-                            st.session_state.carrinho[product_key] = {
-                                'EAN': row.get('EAN', ''),
-                                'Referência': row.get('Referência', ''),
-                                'Produto': row.get('Produto', ''),
-                                'Setor': row.get('Setor', ''),
-                                'Quantidade': row.get('Quantidade', 0),
-                                'Fornecedor': row.get('Fornecedor', ''),
-                                'qty_pedido': 1
-                            }
-                        elif not adicionar and product_key in st.session_state.carrinho:
-                            # Remover do carrinho
-                            del st.session_state.carrinho[product_key]
-                    
-                    with col2:
-                        st.write(f"**{row.get('Produto', 'N/A')}**")
-                        if row.get('Referência'):
-                            st.caption(f"Ref: {row.get('Referência')}")
-                    
-                    with col3:
-                        st.write(f"EAN: {row.get('EAN', 'N/A')}")
-                        st.write(f"Setor: {row.get('Setor', 'N/A')}")
-                    
-                    with col4:
-                        st.write(f"Estoque: **{row.get('Quantidade', 0)}**")
-                        st.caption(f"Fornecedor: {row.get('Fornecedor', 'N/A')}")
-                    
-                    with col5:
-                        if product_key in st.session_state.carrinho:
-                            # Permitir ajustar quantidade do pedido
-                            qty_pedido = st.number_input(
-                                "Qtd Pedido", 
-                                min_value=1, 
-                                max_value=row.get('Quantidade', 1),
-                                value=st.session_state.carrinho[product_key]['qty_pedido'],
-                                key=f"qty_{product_key}"
-                            )
-                            st.session_state.carrinho[product_key]['qty_pedido'] = qty_pedido
-                    
-                    st.markdown("---")
-                
-                # Estatísticas
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    total_items = len(df_stock)
-                    st.metric("Total de Itens", total_items)
-                
-                with col2:
-                    if 'Quantidade' in df_stock.columns:
-                        total_quantity = df_stock["Quantidade"].sum()
-                        st.metric("Quantidade Total", total_quantity)
-                
-                with col3:
-                    if 'Quantidade' in df_stock.columns:
-                        low_stock = len(df_stock[df_stock["Quantidade"] < 10])
-                        st.metric("Estoque Baixo (<10)", low_stock)
-                
-                with col4:
-                    if 'Setor' in df_stock.columns:
-                        sectors_count = df_stock["Setor"].nunique()
-                        st.metric("Setores", sectors_count)
+                        with col2:
+                            st.write(f"**{row.get('Produto', 'N/A')}**")
+                            if row.get('Referência'):
+                                st.caption(f"Ref: {row.get('Referência')}")
+                        
+                        with col3:
+                            st.write(f"EAN: {row.get('EAN', 'N/A')}")
+                            st.write(f"Setor: {row.get('Setor', 'N/A')}")
+                        
+                        with col4:
+                            st.write(f"Estoque: **{row.get('Quantidade', 0)}**")
+                            st.caption(f"Fornecedor: {row.get('Fornecedor', 'N/A')}")
+                        
+                        with col5:
+                            if product_key in st.session_state.carrinho:
+                                # Permitir ajustar quantidade do pedido (só aqui)
+                                qty_pedido = st.number_input(
+                                    "Qtd Pedido", 
+                                    min_value=1, 
+                                    max_value=row.get('Quantidade', 1),
+                                    value=st.session_state.carrinho[product_key]['qty_pedido'],
+                                    key=f"qty_{product_key}"
+                                )
+                                st.session_state.carrinho[product_key]['qty_pedido'] = qty_pedido
+                        
+                        st.markdown("---")
             else:
                 st.info("📦 Nenhum produto disponível com os filtros aplicados.")
             
@@ -559,7 +564,7 @@ if page == "Estoque Disponível":
                 total_itens_carrinho = 0
                 
                 for product_key, item in st.session_state.carrinho.items():
-                    col1, col2, col3, col4, col5 = st.columns([3, 2, 1, 1, 1])
+                    col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
                     
                     with col1:
                         st.write(f"**{item['Produto']}**")
@@ -571,23 +576,14 @@ if page == "Estoque Disponível":
                     
                     with col3:
                         st.write(f"Estoque: {item['Quantidade']}")
+                        st.write(f"**Qtd Pedido: {item['qty_pedido']}**")
                     
                     with col4:
-                        qty_pedido = st.number_input(
-                            "Qtd", 
-                            min_value=1, 
-                            max_value=item['Quantidade'],
-                            value=item['qty_pedido'],
-                            key=f"cart_qty_{product_key}"
-                        )
-                        st.session_state.carrinho[product_key]['qty_pedido'] = qty_pedido
-                    
-                    with col5:
                         if st.button("❌", key=f"remove_{product_key}", help="Remover do carrinho"):
                             del st.session_state.carrinho[product_key]
                             st.rerun()
                     
-                    total_carrinho += qty_pedido
+                    total_carrinho += item['qty_pedido']
                     total_itens_carrinho += 1
                 
                 # Resumo do carrinho

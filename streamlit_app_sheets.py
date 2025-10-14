@@ -288,14 +288,17 @@ def authenticate_user(username, password):
         records = worksheet.get_all_records()
         
         log(f"🔍 Verificando login para usuário: {username}")
+        log(f"📊 Total de registros encontrados: {len(records)}")
         
         # Procurar usuário na planilha
-        for record in records:
-            login = record.get('Login', '').strip()
-            senha = record.get('Senha', '').strip()
-            permissao = record.get('Permissão', '').strip()
-            loja = record.get('Loja', '').strip()
-            app = record.get('App', '').strip()
+        for i, record in enumerate(records):
+            log(f"📋 Registro {i+1}: {record}")
+            # Aceitar tanto maiúscula quanto minúscula nos nomes das colunas
+            login = (record.get('Login', '') or record.get('login', '')).strip()
+            senha = (record.get('Senha', '') or record.get('senha', '')).strip()
+            permissao = (record.get('Permissão', '') or record.get('permissão', '') or record.get('Permissao', '') or record.get('permissao', '')).strip()
+            loja = (record.get('Loja', '') or record.get('loja', '')).strip()
+            app = (record.get('App', '') or record.get('app', '')).strip()
             
             # Verificar se é o usuário correto
             if login.lower() == username.lower():
@@ -303,8 +306,12 @@ def authenticate_user(username, password):
                 
                 # Verificar senha
                 if senha == password:
-                    # Verificar permissão (deve ser "VERDADEIRO")
-                    if permissao.upper() == "VERDADEIRO":
+                    # Verificar permissão (pode ser "VERDADEIRO", "TRUE", ou checkbox marcado)
+                    permissao_valida = (permissao.upper() in ["VERDADEIRO", "TRUE", "1"] or 
+                                      permissao.lower() in ["true", "verdadeiro"] or
+                                      permissao == True)
+                    
+                    if permissao_valida:
                         # Verificar se tem acesso ao app de pedidos
                         if app.lower() in ["pedidos", "geral"]:
                             user_data = {

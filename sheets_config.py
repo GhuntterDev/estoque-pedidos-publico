@@ -19,6 +19,7 @@ SEND_TO_SHEETS = True
 WS_ORDERS = "Pedidos"
 WS_STOCK = "Estoque"
 WS_SECTORS = "Setores"
+WS_LOGIN = "Login"
 
 # Configurações do Google Sheets
 SHEETS_CONFIG = {
@@ -28,5 +29,6 @@ SHEETS_CONFIG = {
         "pedidos": WS_ORDERS,
         "estoque": WS_STOCK,
         "setores": WS_SECTORS,
+        "login": WS_LOGIN,
     }
 }

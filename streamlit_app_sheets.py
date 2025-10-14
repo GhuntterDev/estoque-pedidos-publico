@@ -272,20 +272,63 @@ def get_sectors():
 # ============================================================================
 
 def authenticate_user(username, password):
-    """Autenticação simples baseada em usuários fixos"""
-    users = {
-        "GhtDev": {"password": "18111997", "role": "admin", "full_name": "GhtDev", "store": "MDC - CD"},
-        "admin": {"password": "admin123", "role": "admin", "full_name": "Administrador", "store": "MDC - CD"},
-        "cd": {"password": "cd123", "role": "cd", "full_name": "Centro de Distribuição", "store": "MDC - CD"},
-        "loja": {"password": "loja123", "role": "store", "full_name": "Loja", "store": "MDC - Loja 1"}
-    }
-    
-    if username in users and users[username]["password"] == password:
-        log(f"✅ Autenticação bem-sucedida para: {username}")
-        return True, users[username]
-    
-    log(f"❌ Falha na autenticação para: {username}")
-    return False, None
+    """Autenticação usando Google Sheets - aba Login"""
+    try:
+        # Conectar ao Google Sheets
+        client = get_sheets_client()
+        if not client:
+            log("❌ Erro ao conectar com Google Sheets para autenticação")
+            return False, None
+        
+        # Acessar a aba Login
+        worksheet = client.open_by_key(SPREADSHEET_ID).worksheet("Login")
+        records = worksheet.get_all_records()
+        
+        log(f"🔍 Verificando login para usuário: {username}")
+        
+        # Procurar usuário na planilha
+        for record in records:
+            login = record.get('Login', '').strip()
+            senha = record.get('Senha', '').strip()
+            permissao = record.get('Permissão', '').strip()
+            loja = record.get('Loja', '').strip()
+            app = record.get('App', '').strip()
+            
+            # Verificar se é o usuário correto
+            if login.lower() == username.lower():
+                log(f"📋 Usuário encontrado: {login}, permissão: {permissao}, app: {app}")
+                
+                # Verificar senha
+                if senha == password:
+                    # Verificar permissão (deve ser "VERDADEIRO")
+                    if permissao.upper() == "VERDADEIRO":
+                        # Verificar se tem acesso ao app de pedidos
+                        if app.lower() in ["pedidos", "geral"]:
+                            user_data = {
+                                "login": login,
+                                "role": "store" if app.lower() == "pedidos" else "admin",
+                                "full_name": login,
+                                "store": loja,
+                                "app": app
+                            }
+                            log(f"✅ Autenticação bem-sucedida para: {login} (app: {app})")
+                            return True, user_data
+                        else:
+                            log(f"❌ Usuário {login} não tem acesso ao app de pedidos (app: {app})")
+                            return False, {"error": f"Este usuário não tem acesso ao app de pedidos. App permitido: {app}"}
+                    else:
+                        log(f"❌ Usuário {login} não tem permissão (permissão: {permissao})")
+                        return False, {"error": "Usuário não tem permissão para acessar o sistema"}
+                else:
+                    log(f"❌ Senha incorreta para usuário: {login}")
+                    return False, {"error": "Senha incorreta"}
+        
+        log(f"❌ Usuário não encontrado: {username}")
+        return False, {"error": "Usuário não encontrado"}
+        
+    except Exception as e:
+        log(f"❌ Erro na autenticação: {str(e)}")
+        return False, {"error": f"Erro no sistema de autenticação: {str(e)}"}
 
 # ============================================================================
 # MAIN APPLICATION
@@ -328,30 +371,39 @@ if not st.session_state.authenticated:
                         
                         if success and user_data:
                             user_role = user_data.get('role', '')
-                            log(f"Role do usuário: {user_role}")
+                            user_store = user_data.get('store', '')
+                            user_app = user_data.get('app', '')
                             
-                            if user_role == 'store':
-                                st.session_state.authenticated = True
-                                st.session_state.user_data = user_data
-                                log(f"Login autorizado para: {login}")
-                                st.success("Login realizado com sucesso!")
-                                st.rerun()
-                            else:
-                                log(f"Role não autorizado: {user_role}")
-                                st.error(f"Este sistema é apenas para funcionários das lojas. Sua função: {user_role}")
+                            log(f"Role do usuário: {user_role}, Loja: {user_store}, App: {user_app}")
+                            
+                            st.session_state.authenticated = True
+                            st.session_state.user_data = user_data
+                            log(f"Login autorizado para: {login}")
+                            st.success(f"Login realizado com sucesso! Bem-vindo, {user_store}")
+                            st.rerun()
                         else:
                             log(f"Falha na autenticação para: {login}")
-                            st.error("Usuário ou senha incorretos.")
+                            error_msg = user_data.get('error', 'Usuário ou senha incorretos.') if user_data else 'Erro no sistema de autenticação.'
+                            st.error(error_msg)
         
-        # Informações sobre usuários disponíveis
+        # Informações sobre o sistema de login
         st.markdown("---")
         st.markdown("""
-        ### 👥 **Usuários Disponíveis**
+        ### 🔐 **Sistema de Autenticação**
         
-        **Para lojas:**
-        - **loja** / loja123 (Loja)
+        **Login via Google Sheets:**
+        - Os usuários são gerenciados na aba **"Login"** da planilha
+        - Coluna A: Login | Coluna B: Senha | Coluna C: Permissão (VERDADEIRO/FALSO)
+        - Coluna D: Loja | Coluna E: App (pedidos/geral)
         
-        *Nota: Este sistema é específico para funcionários das lojas.*
+        **Apps Suportados:**
+        - `pedidos` - Acesso apenas ao app de pedidos
+        - `geral` - Acesso completo (admin)
+        
+        **Permissões:**
+        - Apenas usuários com permissão "VERDADEIRO" podem acessar
+        - Usuários com app "pedidos" têm acesso limitado
+        - Usuários com app "geral" têm acesso administrativo
         """)
     
     st.stop()

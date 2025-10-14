@@ -281,7 +281,10 @@ def authenticate_user(username, password):
             return False, None
         
         # Acessar a aba Login
-        worksheet = client.open_by_key(SPREADSHEET_ID).worksheet("Login")
+        worksheet = get_worksheet("Login")
+        if not worksheet:
+            log("❌ Erro ao acessar aba Login")
+            return False, {"error": "Erro ao acessar sistema de autenticação"}
         records = worksheet.get_all_records()
         
         log(f"🔍 Verificando login para usuário: {username}")

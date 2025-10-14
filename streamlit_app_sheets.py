@@ -240,7 +240,8 @@ def get_all_orders():
                     log(f"🔍 Colunas disponíveis no primeiro registro: {list(order.keys())}")
                 
                 # Mapear colunas conforme nova estrutura - aceitar variações
-                responsavel = (order.get('Responsável', '') or 
+                responsavel = (order.get('Responsável:', '') or 
+                             order.get('Responsável', '') or 
                              order.get('responsável', '') or 
                              order.get('Responsavel', '') or 
                              order.get('responsavel', '') or '')

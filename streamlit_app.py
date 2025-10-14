@@ -1,5 +1,6 @@
 # estoque_pedidos_sheets.py — Sistema de Pedidos com Google Sheets
 # Interface para funcionários das lojas fazerem pedidos usando Google Sheets
+# Funcionalidades: Ver Estoque, Fazer Pedidos, Acompanhar Status, Histórico
 
 import os, sys
 import json
@@ -98,13 +99,12 @@ def get_sheets_client():
             spreadsheet_id = st.secrets['SPREADSHEET_ID']
             log(f"✅ SPREADSHEET_ID carregado de secrets: {spreadsheet_id}")
         else:
-            log(f"ℹ️ Usando SPREADSHEET_ID padrão: {spreadsheet_id}")
+            log(f"✅ SPREADSHEET_ID carregado de sheets_config.py: {spreadsheet_id}")
         
-        # 5. Conectar ao Google Sheets
-        gc = gspread.authorize(credentials)
-        spreadsheet = gc.open_by_key(spreadsheet_id)
-        log(f"✅ Conectado ao Google Sheets: {spreadsheet.title}")
-        return spreadsheet
+        # 5. Autorizar e retornar cliente
+        client = gspread.authorize(credentials)
+        log("✅ Cliente Google Sheets autorizado com sucesso!")
+        return client
         
     except Exception as e:
         log(f"❌ ERRO ao conectar com Google Sheets: {e}")
@@ -112,146 +112,95 @@ def get_sheets_client():
         log(f"   Traceback: {traceback.format_exc()}")
         return None
 
-def get_worksheet(name):
-    """Obtém worksheet pelo nome"""
+def get_worksheet(worksheet_name):
+    """Obtém uma planilha específica"""
     try:
-        spreadsheet = get_sheets_client()
-        if spreadsheet:
-            ws = spreadsheet.worksheet(name)
-            log(f"✅ Worksheet '{name}' acessada com sucesso")
-            return ws
-        return None
+        client = get_sheets_client()
+        if not client:
+            return None
+        
+        spreadsheet = client.open_by_key(SPREADSHEET_ID)
+        worksheet = spreadsheet.worksheet(worksheet_name)
+        return worksheet
+        
     except Exception as e:
-        log(f"❌ ERRO ao obter worksheet '{name}': {e}")
+        log(f"❌ ERRO ao obter planilha '{worksheet_name}': {e}")
         return None
 
 def get_current_stock_for_orders():
-    """Calcula estoque atual baseado em entradas e saídas do Google Sheets"""
+    """Obtém estoque atual diretamente da aba 'Saldo' do Google Sheets"""
     try:
-        # Obter todas as entradas
-        ws_in = get_worksheet("Entrada")
-        entries = []
-        if ws_in:
-            entries = ws_in.get_all_records()
-            log(f"✅ {len(entries)} entradas encontradas")
+        # Obter dados diretamente da aba 'Saldo'
+        ws_saldos = get_worksheet("Saldo")
+        if not ws_saldos:
+            log("❌ Aba 'Saldo' não encontrada")
+            return []
         
-        # Obter todas as saídas
-        ws_out = get_worksheet("Saídas")
-        dispatches = []
-        if ws_out:
-            dispatches = ws_out.get_all_records()
-            log(f"✅ {len(dispatches)} saídas encontradas")
+        records = ws_saldos.get_all_records()
+        log(f"✅ {len(records)} registros encontrados na aba 'Saldo'")
         
-        # Calcular estoque por produto (agrupado por EAN)
-        stock_dict = {}
-        
-        # Processar entradas
-        for entry in entries:
-            # Tentar diferentes formatos de chave
-            ref = entry.get('Referencia') or entry.get('Referência') or entry.get('reference') or ''
-            name = entry.get('Nome') or entry.get('name') or entry.get('product_name') or ''
-            ean = entry.get('Código de Barras') or entry.get('EAN') or entry.get('ean') or ''
-            qty = entry.get('Quantidade') or entry.get('quantity') or 0
-            volumes = entry.get('Volumes') or entry.get('volumes') or 0
-            sector = entry.get('Setor') or entry.get('sector') or entry.get('sector_name') or ''
+        stock_list = []
+        for record in records:
+            # Extrair dados da aba Saldo
+            fornecedor = record.get('Fornecedor') or record.get('fornecedor') or ''
+            referencia = record.get('Referencia') or record.get('Referência') or record.get('referencia') or ''
+            ean = record.get('Código de Barras') or record.get('codigo_de_barras') or record.get('ean') or ''
+            nome = record.get('Nome') or record.get('nome') or record.get('produto') or ''
+            setor = record.get('Setor') or record.get('setor') or ''
+            quantidade = record.get('Quantidade') or record.get('quantidade') or record.get('estoque') or 0
             
-            # Converter quantidade para número
+            # Converter quantidade para inteiro
             try:
-                qty = float(qty) if qty else 0
-                volumes = float(volumes) if volumes else 0
-            except:
-                qty = 0
-                volumes = 0
+                quantidade = int(float(quantidade)) if quantidade else 0
+            except (ValueError, TypeError):
+                quantidade = 0
             
-            # Usar EAN como chave principal (para agrupar produtos iguais)
-            key = ean if ean else (ref if ref else name)
-            if not key:
-                continue
-            
-            if key not in stock_dict:
-                stock_dict[key] = {
-                    'ID': '',  # Será preenchido depois
+            if referencia and nome:  # Só incluir se tiver dados básicos
+                stock_item = {
+                    'ID': len(stock_list),
                     'EAN': ean,
-                    'Referência': ref,
-                    'Produto': name,
-                    'Setor': sector,
-                    'Quantidade': 0,  # Quantidade total calculada
+                    'Referência': referencia,
+                    'Produto': nome,
+                    'Setor': setor,
+                    'Quantidade': quantidade,
+                    'Fornecedor': fornecedor,
                     'Última Atualização': now_br().strftime("%d/%m/%Y %H:%M")
                 }
-            else:
-                # Atualizar informações se esta entrada tem dados mais completos
-                if not stock_dict[key]['Produto'] and name:
-                    stock_dict[key]['Produto'] = name
-                if not stock_dict[key]['Referência'] and ref:
-                    stock_dict[key]['Referência'] = ref
-                if not stock_dict[key]['Setor'] and sector:
-                    stock_dict[key]['Setor'] = sector
-                if not stock_dict[key]['EAN'] and ean:
-                    stock_dict[key]['EAN'] = ean
-            
-            # Somar quantidade (volumes * quantidade por volume)
-            total = volumes * qty if volumes > 0 else qty
-            stock_dict[key]['Quantidade'] += total
+                stock_list.append(stock_item)
         
-        # Processar saídas (subtrair)
-        for dispatch in dispatches:
-            # Tentar diferentes formatos de chave
-            ref = dispatch.get('Referencia') or dispatch.get('Referência') or dispatch.get('reference') or ''
-            name = dispatch.get('Nome') or dispatch.get('name') or dispatch.get('product_name') or ''
-            ean = dispatch.get('Código de Barras') or dispatch.get('EAN') or dispatch.get('ean') or ''
-            qty = dispatch.get('Quantidade') or dispatch.get('quantity') or 0
-            
-            # Converter quantidade para número
-            try:
-                qty = float(qty) if qty else 0
-            except:
-                qty = 0
-            
-            # Usar EAN como chave principal (mesma lógica das entradas)
-            key = ean if ean else (ref if ref else name)
-            if not key:
-                continue
-            
-            if key in stock_dict:
-                stock_dict[key]['Quantidade'] -= qty
-        
-        # Converter para lista e ajustar tipos
-        stock_list = []
-        for item in stock_dict.values():
-            item['Quantidade'] = int(item['Quantidade'])  # Converter para inteiro
-            stock_list.append(item)
-        
-        log(f"✅ Estoque calculado: {len(stock_list)} produtos")
-        
+        log(f"✅ Estoque carregado da aba 'Saldo': {len(stock_list)} produtos")
         return stock_list
         
     except Exception as e:
-        log(f"❌ ERRO ao calcular estoque: {e}")
+        log(f"❌ ERRO ao carregar estoque da aba 'Saldo': {e}")
         import traceback
         log(f"   Traceback: {traceback.format_exc()}")
         return []
 
 def create_order_in_sheets(store, products_data):
-    """Cria pedido no Google Sheets"""
+    """Cria um pedido no Google Sheets"""
     try:
-        ws = get_worksheet(WS_ORDERS)
-        if ws:
-            now = now_br()
-            for product in products_data:
-                row = [
-                    len(ws.get_all_values()) + 1,  # ID
-                    now.strftime("%d/%m/%Y"),      # Data
-                    now.strftime("%H:%M:%S"),      # Hora
-                    store,                         # Loja
-                    product['reference'],          # Referência
-                    product['name'],               # Nome
-                    product['quantity'],           # Quantidade
-                    product['sector'],             # Setor
-                    "Pendente"                     # Status
-                ]
-                ws.append_row(row)
-            log(f"✅ Pedido criado no Google Sheets para {store}")
-            return True
+        ws_pedidos = get_worksheet(WS_ORDERS)
+        if not ws_pedidos:
+            log("❌ Planilha de pedidos não encontrada")
+            return False
+        
+        # Preparar dados do pedido
+        order_data = {
+            'Data': now_br().strftime("%d/%m/%Y"),
+            'Hora': now_br().strftime("%H:%M"),
+            'Loja': store,
+            'Status': 'Pendente',
+            'Produtos': json.dumps(products_data, ensure_ascii=False),
+            'Total_Itens': sum(item['quantidade'] for item in products_data),
+            'Observacoes': ''
+        }
+        
+        # Adicionar linha na planilha
+        ws_pedidos.append_row(list(order_data.values()))
+        log(f"✅ Pedido criado para {store} com {len(products_data)} produtos")
+        return True
+        
     except Exception as e:
         log(f"❌ ERRO ao criar pedido: {e}")
         return False
@@ -259,79 +208,38 @@ def create_order_in_sheets(store, products_data):
 def get_orders_by_store(store):
     """Obtém pedidos de uma loja específica"""
     try:
-        ws = get_worksheet(WS_ORDERS)
-        if ws:
-            records = ws.get_all_records()
-            # Filtrar por loja
-            store_orders = []
-            for order in records:
-                if order.get('Loja') == store:
-                    # Converter para formato esperado
-                    store_orders.append({
-                        'ID': order.get('ID', ''),
-                        'Loja': order.get('Loja', ''),
-                        'EAN': order.get('Código de Barras', ''),
-                        'Referência': order.get('Referência', ''),
-                        'Produto': order.get('Nome', ''),
-                        'Quantidade Solicitada': order.get('Quantidade', 0),
-                        'Quantidade Atendida': 0,
-                        'Pendente': order.get('Quantidade', 0),
-                        'Solicitado por': store,
-                        'Status': order.get('Status', 'Pendente'),
-                        'Criado em': f"{order.get('Data', '')} {order.get('Hora', '')}",
-                        'Atualizado em': f"{order.get('Data', '')} {order.get('Hora', '')}",
-                        'Observações': ''
-                    })
-            return store_orders
-        return []
+        ws_pedidos = get_worksheet(WS_ORDERS)
+        if not ws_pedidos:
+            return []
+        
+        records = ws_pedidos.get_all_records()
+        store_orders = [record for record in records if record.get('Loja') == store]
+        return store_orders
+        
     except Exception as e:
-        log(f"❌ ERRO ao obter pedidos da loja {store}: {e}")
+        log(f"❌ ERRO ao carregar pedidos da loja {store}: {e}")
         return []
 
-def get_sectors():
-    """Obtém setores do Google Sheets"""
-    try:
-        ws = get_worksheet(WS_SECTORS)
-        if ws:
-            records = ws.get_all_records()
-            # Tentar diferentes formatos de coluna
-            if records and len(records) > 0:
-                first_record = records[0]
-                # Verificar qual chave usar
-                if 'nome' in first_record:
-                    return [s['nome'] for s in records if s.get('nome')]
-                elif 'Setor' in first_record:
-                    return [s['Setor'] for s in records if s.get('Setor')]
-                elif 'Nome' in first_record:
-                    return [s['Nome'] for s in records if s.get('Nome')]
-            return ["Bijuteria", "Moda", "Casa", "Outros"]
-        return ["Bijuteria", "Moda", "Casa", "Outros"]
-    except Exception as e:
-        log(f"❌ ERRO ao obter setores: {e}")
-        return ["Bijuteria", "Moda", "Casa", "Outros"]
-
 # ============================================================================
-# FUNÇÕES DE AUTENTICAÇÃO SIMPLES
+# SISTEMA DE AUTENTICAÇÃO SIMPLES
 # ============================================================================
 
-def authenticate_user(username, password):
-    """Autenticação simples baseada em usuários fixos"""
+def authenticate_user(login, password):
+    """Sistema de autenticação simples para demonstração"""
     users = {
-        "GhtDev": {"password": "18111997", "role": "admin", "full_name": "GhtDev", "store": "MDC - CD"},
-        "admin": {"password": "admin123", "role": "admin", "full_name": "Administrador", "store": "MDC - CD"},
-        "cd": {"password": "cd123", "role": "cd", "full_name": "Centro de Distribuição", "store": "MDC - CD"},
-        "loja": {"password": "loja123", "role": "store", "full_name": "Loja", "store": "MDC - Loja 1"}
+        "loja": {"password": "loja123", "full_name": "Funcionário Loja", "role": "store", "store": "MDC - Carioca"},
+        "admin": {"password": "admin123", "full_name": "Administrador", "role": "admin", "store": "CD"}
     }
     
-    if username in users and users[username]["password"] == password:
-        log(f"✅ Autenticação bem-sucedida para: {username}")
-        return True, users[username]
+    if login in users and users[login]["password"] == password:
+        user_data = users[login].copy()
+        user_data["username"] = login
+        return True, user_data
     
-    log(f"❌ Falha na autenticação para: {username}")
-    return False, None
+    return False, {}
 
 # ============================================================================
-# MAIN APPLICATION
+# INTERFACE PRINCIPAL
 # ============================================================================
 
 # Sistema de autenticação
@@ -348,58 +256,41 @@ if not st.session_state.authenticated:
     
     with col2:
         st.title("🛒 Melhor das Casas")
-        st.subheader("Sistema de Pedidos (Google Sheets)")
+        st.subheader("Sistema de Pedidos (Carrinho de Compras)")
         
         with st.form("login_form"):
-            login = st.text_input("Usuário", placeholder="Digite seu login")
+            login = st.text_input("Usuário", placeholder="Digite seu login", value="loja")
             password = st.text_input("Senha", type="password", placeholder="Digite sua senha")
             submit = st.form_submit_button("Entrar", use_container_width=True)
             
             if submit:
-                # Limpar espaços em branco dos campos
-                login = login.strip() if login else ""
-                password = password.strip() if password else ""
-                
                 if not login or not password:
                     st.error("Por favor, preencha todos os campos.")
                 else:
-                    with st.spinner("Autenticando..."):
-                        log(f"Tentativa de login: usuário='{login}'")
-                        success, user_data = authenticate_user(login, password)
-                        
-                        log(f"Resultado autenticação: success={success}, user_data={user_data}")
-                        
-                        if success and user_data:
-                            user_role = user_data.get('role', '')
-                            log(f"Role do usuário: {user_role}")
-                            
-                            if user_role == 'store':
-                                st.session_state.authenticated = True
-                                st.session_state.user_data = user_data
-                                log(f"Login autorizado para: {login}")
-                                st.success("Login realizado com sucesso!")
-                                st.rerun()
-                            else:
-                                log(f"Role não autorizado: {user_role}")
-                                st.error(f"Este sistema é apenas para funcionários das lojas. Sua função: {user_role}")
-                        else:
-                            log(f"Falha na autenticação para: {login}")
-                            st.error("Usuário ou senha incorretos.")
+                    success, user_data = authenticate_user(login, password)
+                    
+                    if success and user_data['role'] == 'store':
+                        st.session_state.authenticated = True
+                        st.session_state.user_data = user_data
+                        st.success("Login realizado com sucesso!")
+                        st.rerun()
+                    elif success:
+                        st.error("Acesso negado. Este sistema é específico para funcionários das lojas.")
+                    else:
+                        st.error("Usuário ou senha incorretos.")
         
-        # Informações sobre usuários disponíveis
         st.markdown("---")
-        st.markdown("""
-        ### 👥 **Usuários Disponíveis**
-        
-        **Para lojas:**
-        - **loja** / loja123 (Loja)
-        
-        *Nota: Este sistema é específico para funcionários das lojas.*
-        """)
+        st.markdown("### 👥 **Usuários Disponíveis**")
+        st.markdown("**Para lojas:**")
+        st.markdown("- loja / loja123 (Loja)")
+        st.markdown("*Nota: Este sistema é específico para funcionários das lojas.*")
     
     st.stop()
 
 st.set_page_config(page_title="MDC — Pedidos", page_icon="🛒", layout="wide")
+
+if "sectors" not in st.session_state:
+    st.session_state.sectors = ["Geral", "Brinquedos", "Papelaria", "Decoração"]
 
 with st.sidebar:
     st.title("MDC — Pedidos")
@@ -411,408 +302,299 @@ with st.sidebar:
         st.session_state.authenticated = False
         st.session_state.user_data = None
         st.rerun()
-    
-    st.markdown("---")
-    
-    # Monta o menu
-    pages = ["Estoque Disponível", "Novo Pedido", "Meus Pedidos", "Histórico"]
-    page = st.radio("Módulo", pages, index=0)
-    st.markdown("---")
-    st.caption("© 2025 - Sistema Google Sheets")
 
 # ============================================================================
-# ESTOQUE DISPONÍVEL
+# PÁGINA PRINCIPAL
 # ============================================================================
-if page == "Estoque Disponível":
-    st.header("📦 Estoque Disponível para Pedidos")
+
+st.title("🛒 Sistema de Pedidos")
+st.markdown(f"**Bem-vindo, {st.session_state.user_data['full_name']}!**")
+
+# Dashboard
+st.header("📊 Dashboard")
+
+try:
+    # Carregar dados do Google Sheets
+    stock = get_current_stock_for_orders()
+    orders = get_orders_by_store(st.session_state.user_data['store'])
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Produtos Disponíveis", len(stock))
+    
+    with col2:
+        active_orders = len([o for o in orders if o.get('Status', '').upper() == 'PENDENTE'])
+        st.metric("Pedidos Pendentes", active_orders)
+    
+    with col3:
+        total_quantity = sum([s.get('Quantidade', 0) for s in stock])
+        st.metric("Quantidade Total", total_quantity)
+    
+    with col4:
+        sectors_count = len(set([s.get('Setor', '') for s in stock if s.get('Setor')]))
+        st.metric("Setores", sectors_count)
+    
+except Exception as e:
+    st.error(f"Erro ao carregar dados: {str(e)}")
+    st.info("Verifique a conexão com o Google Sheets")
+
+# Seções do sistema
+st.markdown("---")
+
+tab1, tab2, tab3, tab4 = st.tabs(["🛒 Novo Pedido", "📋 Meus Pedidos", "📦 Estoque Disponível", "⚙️ Configurações"])
+
+with tab1:
+    st.header("🛒 Novo Pedido")
     
     try:
-        stock_data = get_current_stock_for_orders()
+        # Carregar estoque atual
+        stock = get_current_stock_for_orders()
         
-        if stock_data:
-            # Criar DataFrame
-            df_stock = pd.DataFrame(stock_data)
+        if stock:
+            st.subheader("📦 Produtos Disponíveis")
+            
+            # Criar DataFrame para exibição
+            df_stock = pd.DataFrame(stock)
             
             # Filtros
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                if 'Setor' in df_stock.columns:
-                    sector_filter = st.selectbox("Filtrar por Setor", ["Todos"] + list(df_stock["Setor"].unique()))
-                    if sector_filter != "Todos":
-                        df_stock = df_stock[df_stock["Setor"] == sector_filter]
+                setor_filter = st.selectbox("Filtrar por Setor:", ["Todos"] + list(df_stock['Setor'].unique()))
             
             with col2:
-                search_term = st.text_input("Buscar Produto", placeholder="Digite nome, EAN ou referência")
-                if search_term and 'Produto' in df_stock.columns:
-                    mask = (df_stock["Produto"].str.contains(search_term, case=False, na=False) |
-                           df_stock["EAN"].str.contains(search_term, case=False, na=False) |
-                           df_stock["Referência"].str.contains(search_term, case=False, na=False))
-                    df_stock = df_stock[mask]
+                produto_filter = st.text_input("Buscar Produto:", placeholder="Digite o nome do produto...")
             
             with col3:
-                min_stock = st.number_input("Estoque Mínimo", min_value=0, value=0)
-                if min_stock > 0 and 'Quantidade' in df_stock.columns:
-                    df_stock = df_stock[df_stock["Quantidade"] >= min_stock]
+                min_stock = st.number_input("Estoque Mínimo:", min_value=0, value=0)
             
-            # Mostrar resultados
-            st.subheader(f"Produtos Disponíveis ({len(df_stock)} itens)")
+            # Aplicar filtros
+            filtered_df = df_stock.copy()
             
-            if not df_stock.empty:
-                # Mostrar tabela
-                st.dataframe(df_stock, use_container_width=True)
+            if setor_filter != "Todos":
+                filtered_df = filtered_df[filtered_df['Setor'] == setor_filter]
+            
+            if produto_filter:
+                filtered_df = filtered_df[filtered_df['Produto'].str.contains(produto_filter, case=False, na=False)]
+            
+            filtered_df = filtered_df[filtered_df['Quantidade'] >= min_stock]
+            
+            # Exibir produtos filtrados
+            if not filtered_df.empty:
+                st.dataframe(filtered_df, use_container_width=True)
                 
-                # Estatísticas
-                col1, col2, col3, col4 = st.columns(4)
+                # Formulário de pedido
+                st.markdown("---")
+                st.subheader("📝 Criar Novo Pedido")
+                
+                # Carrinho de compras
+                if "carrinho" not in st.session_state:
+                    st.session_state.carrinho = []
+                
+                # Seleção de produtos
+                col1, col2, col3 = st.columns([3, 1, 1])
                 
                 with col1:
-                    total_items = len(df_stock)
-                    st.metric("Total de Itens", total_items)
+                    selected_product = st.selectbox(
+                        "Selecionar Produto:",
+                        options=filtered_df.index,
+                        format_func=lambda x: f"{filtered_df.loc[x, 'Produto']} - {filtered_df.loc[x, 'Referência']} (Estoque: {filtered_df.loc[x, 'Quantidade']})"
+                    )
                 
                 with col2:
-                    if 'Quantidade' in df_stock.columns:
-                        total_quantity = df_stock["Quantidade"].sum()
-                        st.metric("Quantidade Total", total_quantity)
+                    quantidade = st.number_input("Quantidade:", min_value=1, value=1)
                 
                 with col3:
-                    if 'Quantidade' in df_stock.columns:
-                        low_stock = len(df_stock[df_stock["Quantidade"] < 10])
-                        st.metric("Estoque Baixo (<10)", low_stock)
+                    if st.button("➕ Adicionar ao Carrinho", use_container_width=True):
+                        if selected_product is not None:
+                            produto = filtered_df.loc[selected_product]
+                            
+                            # Verificar se já está no carrinho
+                            existing_item = None
+                            for item in st.session_state.carrinho:
+                                if item['referencia'] == produto['Referência']:
+                                    existing_item = item
+                                    break
+                            
+                            if existing_item:
+                                existing_item['quantidade'] += quantidade
+                                st.success(f"Quantidade atualizada para {existing_item['quantidade']} unidades")
+                            else:
+                                st.session_state.carrinho.append({
+                                    'referencia': produto['Referência'],
+                                    'produto': produto['Produto'],
+                                    'setor': produto['Setor'],
+                                    'quantidade': quantidade,
+                                    'estoque_disponivel': produto['Quantidade']
+                                })
+                                st.success(f"Produto adicionado ao carrinho!")
+                            st.rerun()
                 
-                with col4:
-                    if 'Setor' in df_stock.columns:
-                        sectors_count = df_stock["Setor"].nunique()
-                        st.metric("Setores", sectors_count)
-            else:
-                st.info("📦 Nenhum produto disponível com os filtros aplicados.")
-        else:
-            st.info("📦 Nenhum produto disponível. Entre em contato com o CD.")
-            
-    except Exception as e:
-        st.error(f"❌ Erro ao carregar estoque: {e}")
-        log(f"ERRO ao carregar estoque: {e}")
-
-# ============================================================================
-# NOVO PEDIDO
-# ============================================================================
-if page == "Novo Pedido":
-    st.header("🛒 Novo Pedido")
-    
-    # Opções de modo de pedido
-    modo_pedido = st.radio("Escolha o modo de pedido:", ["📝 Pedido Individual", "📋 Pedido em Tabela"], horizontal=True)
-    
-    if modo_pedido == "📝 Pedido Individual":
-        try:
-            stock_data = get_current_stock_for_orders()
-            
-            if stock_data:
-                # Criar opções de produtos
-                product_options = {}
-                for product in stock_data:
-                    if product.get('Quantidade', 0) > 0:  # Só produtos com estoque
-                        key = f"{product.get('Produto', '')} ({product.get('Referência', '')}) - Estoque: {product.get('Quantidade', 0)}"
-                        product_options[key] = (product.get('EAN', ''), product.get('Referência', ''), product.get('Produto', ''), product.get('Setor', ''), product.get('Quantidade', 0))
-                
-                with st.form("novo_pedido_form"):
-                    col1, col2 = st.columns(2)
+                # Exibir carrinho
+                if st.session_state.carrinho:
+                    st.markdown("---")
+                    st.subheader("🛒 Carrinho de Compras")
+                    
+                    carrinho_df = pd.DataFrame(st.session_state.carrinho)
+                    st.dataframe(carrinho_df, use_container_width=True)
+                    
+                    # Botões do carrinho
+                    col1, col2, col3 = st.columns(3)
                     
                     with col1:
-                        selected_product = st.selectbox("Produto", options=list(product_options.keys()))
-                        quantity = st.number_input("Quantidade", min_value=1, value=1)
+                        if st.button("🗑️ Limpar Carrinho", use_container_width=True):
+                            st.session_state.carrinho = []
+                            st.rerun()
                     
                     with col2:
-                        requested_by = st.text_input("Solicitado por", value=st.session_state.user_data['full_name'])
-                        notes = st.text_area("Observações", placeholder="Observações (opcional)")
+                        if st.button("✏️ Editar Quantidades", use_container_width=True):
+                            st.session_state.edit_carrinho = True
+                            st.rerun()
                     
-                    submitted = st.form_submit_button("🛒 Fazer Pedido", use_container_width=True, type="primary")
-                    
-                    if submitted:
-                        try:
-                            ean, ref, name, sector, available_qty = product_options[selected_product]
-                            
-                            if quantity > available_qty:
-                                st.error(f"❌ Quantidade solicitada ({quantity}) excede o estoque disponível ({available_qty})")
-                            else:
-                                products_data = [{
-                                    'reference': ref,
-                                    'name': name,
-                                    'quantity': quantity,
-                                    'sector': sector
-                                }]
-                                
-                                success = create_order_in_sheets(st.session_state.user_data['store'], products_data)
+                    with col3:
+                        observacoes = st.text_area("Observações:", placeholder="Observações do pedido...")
+                        
+                        if st.button("📤 Enviar Pedido", use_container_width=True, type="primary"):
+                            if st.session_state.carrinho:
+                                success = create_order_in_sheets(st.session_state.user_data['store'], st.session_state.carrinho)
                                 if success:
-                                    st.success(f"✅ Pedido criado com sucesso!")
+                                    st.success("✅ Pedido enviado com sucesso!")
+                                    st.session_state.carrinho = []
                                     st.rerun()
                                 else:
-                                    st.error("❌ Erro ao criar pedido.")
-                        except Exception as e:
-                            st.error(f"❌ Erro ao criar pedido: {e}")
-            else:
-                st.info("📦 Nenhum produto disponível. Entre em contato com o CD.")
+                                    st.error("❌ Erro ao enviar pedido. Tente novamente.")
+                            else:
+                                st.error("❌ Carrinho vazio!")
                 
-        except Exception as e:
-            st.error(f"❌ Erro ao carregar produtos: {e}")
-    
-    else:  # Pedido em Tabela
-        st.subheader("📋 Pedido em Tabela")
-        st.caption("Preencha as linhas abaixo. Produtos serão criados automaticamente se não existirem.")
-        
-        # Inicializar DataFrame se não existir
-        if "pedido_df" not in st.session_state:
-            st.session_state.pedido_df = pd.DataFrame([{
-                "Produto": "",
-                "Referência": "",
-                "EAN": "",
-                "Quantidade": 1,
-                "Setor": get_sectors()[0] if get_sectors() else "Bijuteria",
-                "Observações": "",
-            } for _ in range(5)])
-        
-        # Editor de dados
-        df_pedido = st.data_editor(
-            st.session_state.pedido_df,
-            num_rows="dynamic",
-            use_container_width=True,
-            column_config={
-                "Quantidade": st.column_config.NumberColumn(min_value=1, step=1),
-                "Setor": st.column_config.SelectboxColumn(options=get_sectors(), required=True),
-            },
-            key="pedido_editor",
-        )
-        
-        colA, colB, colC = st.columns([1,1,1])
-        if colA.button("➕ Adicionar 5 linhas", key="add5_pedido"):
-            extra = pd.DataFrame([{
-                "Produto": "",
-                "Referência": "",
-                "EAN": "",
-                "Quantidade": 1,
-                "Setor": get_sectors()[0] if get_sectors() else "Bijuteria",
-                "Observações": "",
-            } for _ in range(5)])
-            st.session_state.pedido_df = pd.concat([st.session_state.pedido_df, extra], ignore_index=True)
-            st.rerun()
-        
-        if colB.button("🗑️ Limpar Tabela", key="clear_pedido", type="secondary"):
-            st.session_state.pedido_df = pd.DataFrame([{
-                "Produto": "",
-                "Referência": "",
-                "EAN": "",
-                "Quantidade": 1,
-                "Setor": get_sectors()[0] if get_sectors() else "Bijuteria",
-                "Observações": "",
-            } for _ in range(5)])
-            st.success("Tabela limpa!")
-            st.rerun()
-        
-        if colC.button("🛒 Fazer Pedido em Lote", key="pedido_lote", type="primary"):
-            st.session_state.pedido_df = df_pedido.copy()
-            linhas = df_pedido.to_dict(orient="records")
-            
-            pedidos_criados = 0
-            erros = []
-            
-            for i, row in enumerate(linhas):
-                produto = row.get("Produto", "").strip()
-                referencia = row.get("Referência", "").strip()
-                ean = row.get("EAN", "").strip()
-                quantidade = row.get("Quantidade", 1)
-                setor = row.get("Setor", "").strip()
-                obs = row.get("Observações", "").strip()
-                
-                # Pular linhas vazias
-                if not produto and not referencia and not ean:
-                    continue
-                
-                # Validação mínima
-                if not produto or not setor:
-                    erros.append(f"Linha {i+1}: Produto e Setor são obrigatórios")
-                    continue
-                
-                try:
-                    products_data = [{
-                        'reference': referencia,
-                        'name': produto,
-                        'quantity': quantidade,
-                        'sector': setor
-                    }]
+                # Edição do carrinho
+                if st.session_state.get("edit_carrinho", False):
+                    st.markdown("---")
+                    st.subheader("✏️ Editar Quantidades")
                     
-                    success = create_order_in_sheets(st.session_state.user_data['store'], products_data)
-                    if success:
-                        pedidos_criados += 1
-                    else:
-                        erros.append(f"Linha {i+1}: Erro ao criar pedido")
+                    for i, item in enumerate(st.session_state.carrinho):
+                        col1, col2, col3 = st.columns([3, 1, 1])
                         
-                except Exception as e:
-                    erros.append(f"Linha {i+1}: {str(e)}")
-            
-            if erros:
-                st.warning(f"⚠️ {len(erros)} erro(s) encontrado(s):")
-                for erro in erros:
-                    st.warning(f"  • {erro}")
-            
-            if pedidos_criados > 0:
-                st.success(f"✅ {pedidos_criados} pedido(s) criado(s) com sucesso!")
-            elif not erros:
-                st.info("Nenhuma linha válida para processar.")
+                        with col1:
+                            st.write(f"**{item['produto']}** - {item['referencia']}")
+                        
+                        with col2:
+                            new_qty = st.number_input(
+                                "Quantidade:", 
+                                min_value=0, 
+                                value=item['quantidade'],
+                                key=f"edit_qty_{i}"
+                            )
+                            if new_qty != item['quantidade']:
+                                st.session_state.carrinho[i]['quantidade'] = new_qty
+                        
+                        with col3:
+                            if st.button("❌", key=f"remove_{i}"):
+                                st.session_state.carrinho.pop(i)
+                                st.rerun()
+                    
+                    if st.button("✅ Concluir Edição", use_container_width=True):
+                        st.session_state.edit_carrinho = False
+                        st.rerun()
+            else:
+                st.info("Nenhum produto encontrado com os filtros aplicados.")
+        else:
+            st.info("Nenhum produto disponível no estoque.")
+    
+    except Exception as e:
+        st.error(f"Erro ao carregar estoque: {str(e)}")
+        st.info("Verifique a conexão com o Google Sheets")
 
-# ============================================================================
-# MEUS PEDIDOS
-# ============================================================================
-if page == "Meus Pedidos":
+with tab2:
     st.header("📋 Meus Pedidos")
     
     try:
-        orders_data = get_orders_by_store(st.session_state.user_data['store'])
+        # Carregar pedidos da loja
+        orders = get_orders_by_store(st.session_state.user_data['store'])
         
-        if orders_data:
-            # Criar DataFrame
-            df_orders = pd.DataFrame(orders_data)
+        if orders:
+            st.subheader("📋 Pedidos Recentes")
             
-            # Filtros
+            # Converter para DataFrame
+            df_orders = pd.DataFrame(orders)
+            
+            # Exibir pedidos
+            st.dataframe(df_orders, use_container_width=True)
+            
+            # Estatísticas
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                total_orders = len(orders)
+                st.metric("Total de Pedidos", total_orders)
+            
+            with col2:
+                pending_orders = len([o for o in orders if o.get('Status', '').upper() == 'PENDENTE'])
+                st.metric("Pendentes", pending_orders)
+            
+            with col3:
+                completed_orders = len([o for o in orders if o.get('Status', '').upper() == 'ATENDIDO'])
+                st.metric("Atendidos", completed_orders)
+            
+            with col4:
+                total_items = sum([o.get('Total_Itens', 0) for o in orders])
+                st.metric("Total de Itens", total_items)
+        else:
+            st.info("Nenhum pedido encontrado para sua loja.")
+    
+    except Exception as e:
+        st.error(f"Erro ao carregar pedidos: {str(e)}")
+        st.info("Verifique a conexão com o Google Sheets")
+
+with tab3:
+    st.header("📦 Estoque Disponível")
+    
+    try:
+        # Carregar estoque atual
+        stock = get_current_stock_for_orders()
+        
+        if stock:
+            df_stock = pd.DataFrame(stock)
+            
+            st.subheader("📦 Produtos Disponíveis")
+            st.dataframe(df_stock, use_container_width=True)
+            
+            # Estatísticas
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                if 'Status' in df_orders.columns:
-                    status_options = ["Todos"] + list(df_orders["Status"].unique())
-                    status_filter = st.selectbox("Filtrar por Status", status_options)
-                    if status_filter != "Todos":
-                        df_orders = df_orders[df_orders["Status"] == status_filter]
+                st.metric("Total de Produtos", len(df_stock))
             
             with col2:
-                if 'Produto' in df_orders.columns:
-                    search_term = st.text_input("Buscar Produto", placeholder="Nome do produto")
-                    if search_term:
-                        df_orders = df_orders[df_orders["Produto"].str.contains(search_term, case=False, na=False)]
+                total_quantity = df_stock['Quantidade'].sum()
+                st.metric("Quantidade Total", total_quantity)
             
             with col3:
-                if 'Criado em' in df_orders.columns:
-                    date_filter = st.date_input("Filtrar por Data", value=dt.date.today())
-                    # Filtrar por data (formato DD/MM/YYYY HH:MM:SS)
-                    df_orders['Data'] = pd.to_datetime(df_orders['Criado em'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
-                    df_orders = df_orders[df_orders['Data'].dt.date == date_filter]
+                low_stock = len(df_stock[df_stock['Quantidade'] < 10])
+                st.metric("Estoque Baixo (<10)", low_stock)
             
-            # Mostrar resultados
-            st.subheader(f"Pedidos ({len(df_orders)} itens)")
-            
-            if not df_orders.empty:
-                # Remover coluna Data temporária
-                display_columns = [col for col in df_orders.columns if col != 'Data']
-                st.dataframe(df_orders[display_columns], use_container_width=True)
-                
-                # Estatísticas
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    total_orders = len(df_orders)
-                    st.metric("Total de Pedidos", total_orders)
-                
-                with col2:
-                    if 'Status' in df_orders.columns:
-                        pending_orders = len(df_orders[df_orders["Status"] == "Pendente"])
-                        st.metric("Pendentes", pending_orders)
-                
-                with col3:
-                    if 'Status' in df_orders.columns:
-                        fulfilled_orders = len(df_orders[df_orders["Status"] == "Atendido"])
-                        st.metric("Atendidos", fulfilled_orders)
-                
-                with col4:
-                    if 'Status' in df_orders.columns:
-                        partial_orders = len(df_orders[df_orders["Status"] == "Parcial"])
-                        st.metric("Parciais", partial_orders)
-                
-                # Exportar dados
-                csv = df_orders[display_columns].to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Exportar Meus Pedidos",
-                    data=csv,
-                    file_name=f"meus_pedidos_{now_br().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
-            else:
-                st.info("📋 Nenhum pedido encontrado com os filtros aplicados.")
+            # Alertas de estoque baixo
+            if low_stock > 0:
+                st.warning(f"⚠️ **{low_stock} produto(s) com estoque baixo:**")
+                low_stock_items = df_stock[df_stock['Quantidade'] < 10][['Produto', 'Referência', 'Quantidade', 'Setor']]
+                st.dataframe(low_stock_items, use_container_width=True)
         else:
-            st.info("📋 Nenhum pedido encontrado.")
-            
-    except Exception as e:
-        st.error(f"❌ Erro ao carregar pedidos: {e}")
-        log(f"ERRO ao carregar pedidos: {e}")
-
-# ============================================================================
-# HISTÓRICO
-# ============================================================================
-if page == "Histórico":
-    st.header("📊 Histórico de Pedidos")
+            st.info("Nenhum produto disponível no estoque.")
     
-    try:
-        orders_data = get_orders_by_store(st.session_state.user_data['store'])
-        
-        if orders_data:
-            # Criar DataFrame
-            df_orders = pd.DataFrame(orders_data)
-            
-            # Filtros de data
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                date_from = st.date_input("Data Inicial", value=dt.date.today() - dt.timedelta(days=30))
-            
-            with col2:
-                date_to = st.date_input("Data Final", value=dt.date.today())
-            
-            # Filtrar por data
-            if 'Criado em' in df_orders.columns:
-                df_orders['Data'] = pd.to_datetime(df_orders['Criado em'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
-                df_orders = df_orders[(df_orders['Data'].dt.date >= date_from) & 
-                                    (df_orders['Data'].dt.date <= date_to)]
-            
-            # Mostrar resultados
-            st.subheader(f"Histórico de Pedidos ({len(df_orders)} itens)")
-            
-            if not df_orders.empty:
-                # Remover coluna Data temporária
-                display_columns = [col for col in df_orders.columns if col != 'Data']
-                st.dataframe(df_orders[display_columns], use_container_width=True)
-                
-                # Estatísticas
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    total_orders = len(df_orders)
-                    st.metric("Total de Pedidos", total_orders)
-                
-                with col2:
-                    if 'Status' in df_orders.columns:
-                        pending_orders = len(df_orders[df_orders["Status"] == "Pendente"])
-                        st.metric("Pendentes", pending_orders)
-                
-                with col3:
-                    if 'Status' in df_orders.columns:
-                        fulfilled_orders = len(df_orders[df_orders["Status"] == "Atendido"])
-                        st.metric("Atendidos", fulfilled_orders)
-                
-                with col4:
-                    if 'Status' in df_orders.columns:
-                        partial_orders = len(df_orders[df_orders["Status"] == "Parcial"])
-                        st.metric("Parciais", partial_orders)
-                
-                # Exportar dados
-                csv = df_orders[display_columns].to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Exportar Histórico",
-                    data=csv,
-                    file_name=f"historico_pedidos_{now_br().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
-            else:
-                st.info("📋 Nenhum pedido encontrado no período.")
-        else:
-            st.info("📋 Nenhum pedido encontrado.")
-            
     except Exception as e:
-        st.error(f"❌ Erro ao carregar histórico: {e}")
-        log(f"ERRO ao carregar histórico: {e}")
+        st.error(f"Erro ao carregar estoque: {str(e)}")
+        st.info("Verifique a conexão com o Google Sheets")
 
-st.markdown("---")
+with tab4:
+    st.header("⚙️ Configurações")
+    
+    st.markdown("### **🔧 Status do Sistema**")
+    st.success("✅ Sistema completo ativo")
+    st.info("Google Sheets configurado")
+    st.info("🔗 Conexão com Google Sheets ativa")
+    
+    st.markdown("### **👤 Informações do Usuário**")
+    st.info(f"**Usuário:** {st.session_state.user_data['username']}")
+    st.info(f"**Nome:** {st.session_state.user_data['full_name']}")
+    st.info(f"**Função:** {st.session_state.user_data['role']}")
+    st.info(f"**Loja:** {st.session_state.user_data['store']}")

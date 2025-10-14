@@ -224,34 +224,50 @@ def create_order_in_sheets(store, products_data):
         log(f"❌ ERRO ao criar pedido: {e}")
         return False
 
-def get_orders_by_store(store):
-    """Obtém pedidos de uma loja específica"""
+def get_all_orders():
+    """Obtém todos os pedidos do Google Sheets"""
     try:
         ws = get_worksheet(WS_ORDERS)
         if ws:
             records = ws.get_all_records()
-            # Filtrar por loja
-            store_orders = []
-            for order in records:
-                if order.get('Loja') == store:
-                    # Converter para formato esperado
-                    store_orders.append({
-                        'ID': order.get('ID', ''),
-                        'Loja': order.get('Loja', ''),
-                        'EAN': order.get('Código de Barras', ''),
-                        'Referência': order.get('Referência', ''),
-                        'Produto': order.get('Nome', ''),
-                        'Quantidade Solicitada': order.get('Quantidade', 0),
-                        'Quantidade Atendida': 0,
-                        'Pendente': order.get('Quantidade', 0),
-                        'Solicitado por': store,
-                        'Status': order.get('Status', 'Pendente'),
-                        'Criado em': f"{order.get('Data', '')} {order.get('Hora', '')}",
-                        'Atualizado em': f"{order.get('Data', '')} {order.get('Hora', '')}",
-                        'Observações': ''
-                    })
-            return store_orders
+            log(f"📋 Total de registros encontrados na aba Pedidos: {len(records)}")
+            
+            # Converter para formato padronizado
+            orders = []
+            for i, order in enumerate(records):
+                # Mapear colunas conforme nova estrutura
+                orders.append({
+                    'Data/Hora': order.get('Data/hora', ''),
+                    'Responsável': order.get('Responsável', ''),
+                    'Referência': order.get('Referência', ''),
+                    'EAN': order.get('Código de Barras', ''),
+                    'Produto': order.get('Produto', ''),
+                    'Quantidade': order.get('Quantidade', 0),
+                    'Loja': order.get('Loja', ''),
+                    'Setor': order.get('Setor do produto solicitado', '') or order.get('Setor', ''),
+                    'Status': order.get('Status', 'Pendente'),
+                    'Finalizado em': order.get('Finalizado em', ''),
+                    'Responsável Saída': order.get('Responsável Saída', ''),
+                    'Obs': order.get('Obs', '')
+                })
+                log(f"📋 Pedido {i+1}: {order.get('Produto', 'N/A')} - Status: {order.get('Status', 'N/A')}")
+            
+            return orders
         return []
+    except Exception as e:
+        log(f"❌ ERRO ao obter pedidos: {e}")
+        import traceback
+        log(f"   Traceback: {traceback.format_exc()}")
+        return []
+
+def get_orders_by_store(store):
+    """Obtém pedidos de uma loja específica"""
+    try:
+        all_orders = get_all_orders()
+        # Filtrar por loja
+        store_orders = [order for order in all_orders if order.get('Loja') == store]
+        log(f"📋 Pedidos encontrados para loja {store}: {len(store_orders)}")
+        return store_orders
     except Exception as e:
         log(f"❌ ERRO ao obter pedidos da loja {store}: {e}")
         return []
@@ -911,11 +927,36 @@ if page == "Histórico":
     st.header("📊 Histórico de Pedidos")
     
     try:
-        orders_data = get_orders_by_store(st.session_state.user_data['store'])
+        # Obter todos os pedidos (não apenas da loja específica)
+        orders_data = get_all_orders()
         
         if orders_data:
             # Criar DataFrame
             df_orders = pd.DataFrame(orders_data)
+            
+            # Filtros
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                # Filtro por status
+                status_options = ["Todos"] + list(df_orders['Status'].unique())
+                status_filter = st.selectbox("Filtrar por Status", status_options)
+                if status_filter != "Todos":
+                    df_orders = df_orders[df_orders['Status'] == status_filter]
+            
+            with col2:
+                # Filtro por loja
+                loja_options = ["Todas"] + list(df_orders['Loja'].unique())
+                loja_filter = st.selectbox("Filtrar por Loja", loja_options)
+                if loja_filter != "Todas":
+                    df_orders = df_orders[df_orders['Loja'] == loja_filter]
+            
+            with col3:
+                # Filtro por responsável
+                responsavel_options = ["Todos"] + list(df_orders['Responsável'].unique())
+                responsavel_filter = st.selectbox("Filtrar por Responsável", responsavel_options)
+                if responsavel_filter != "Todos":
+                    df_orders = df_orders[df_orders['Responsável'] == responsavel_filter]
             
             # Filtros de data
             col1, col2 = st.columns(2)
@@ -926,9 +967,9 @@ if page == "Histórico":
             with col2:
                 date_to = st.date_input("Data Final", value=dt.date.today())
             
-            # Filtrar por data
-            if 'Criado em' in df_orders.columns:
-                df_orders['Data'] = pd.to_datetime(df_orders['Criado em'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
+            # Filtrar por data se necessário
+            if 'Data/Hora' in df_orders.columns and not df_orders.empty:
+                df_orders['Data'] = pd.to_datetime(df_orders['Data/Hora'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
                 df_orders = df_orders[(df_orders['Data'].dt.date >= date_from) & 
                                     (df_orders['Data'].dt.date <= date_to)]
             

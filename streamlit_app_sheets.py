@@ -895,7 +895,7 @@ if page == "Meus Pedidos":
                 
                 with col3:
                     if 'Status' in df_orders.columns:
-                        fulfilled_orders = len(df_orders[df_orders["Status"] == "Atendido"])
+                        fulfilled_orders = len(df_orders[df_orders["Status"] == "Finalizado"])
                         st.metric("Atendidos", fulfilled_orders)
                 
                 with col4:
@@ -977,8 +977,8 @@ if page == "Histórico":
             st.subheader(f"Histórico de Pedidos ({len(df_orders)} itens)")
             
             if not df_orders.empty:
-                # Remover coluna Data temporária
-                display_columns = [col for col in df_orders.columns if col != 'Data']
+                # Remover colunas desnecessárias (Data temporária e Responsável)
+                display_columns = [col for col in df_orders.columns if col not in ['Data', 'Responsável']]
                 st.dataframe(df_orders[display_columns], use_container_width=True)
                 
                 # Estatísticas
@@ -995,7 +995,7 @@ if page == "Histórico":
                 
                 with col3:
                     if 'Status' in df_orders.columns:
-                        fulfilled_orders = len(df_orders[df_orders["Status"] == "Atendido"])
+                        fulfilled_orders = len(df_orders[df_orders["Status"] == "Finalizado"])
                         st.metric("Atendidos", fulfilled_orders)
                 
                 with col4:

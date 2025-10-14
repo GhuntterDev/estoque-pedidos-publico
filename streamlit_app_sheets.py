@@ -386,24 +386,14 @@ if not st.session_state.authenticated:
                             error_msg = user_data.get('error', 'Usuário ou senha incorretos.') if user_data else 'Erro no sistema de autenticação.'
                             st.error(error_msg)
         
-        # Informações sobre o sistema de login
+        # Informações básicas sobre o sistema
         st.markdown("---")
         st.markdown("""
-        ### 🔐 **Sistema de Autenticação**
+        ### 🔐 **Acesso Restrito**
         
-        **Login via Google Sheets:**
-        - Os usuários são gerenciados na aba **"Login"** da planilha
-        - Coluna A: Login | Coluna B: Senha | Coluna C: Permissão (VERDADEIRO/FALSO)
-        - Coluna D: Loja | Coluna E: App (pedidos/geral)
+        Este sistema é destinado exclusivamente para funcionários autorizados.
         
-        **Apps Suportados:**
-        - `pedidos` - Acesso apenas ao app de pedidos
-        - `geral` - Acesso completo (admin)
-        
-        **Permissões:**
-        - Apenas usuários com permissão "VERDADEIRO" podem acessar
-        - Usuários com app "pedidos" têm acesso limitado
-        - Usuários com app "geral" têm acesso administrativo
+        Entre em contato com o administrador para obter suas credenciais de acesso.
         """)
     
     st.stop()

@@ -139,12 +139,21 @@ def get_current_stock_for_orders():
         
         stock_list = []
         for record in records:
-            # Extrair dados da aba Saldos
+            # Extrair dados da aba Saldos (considerando espaços no final das chaves)
             fornecedor = record.get('Fornecedor') or record.get('fornecedor') or ''
-            referencia = record.get('Referencia') or record.get('Referência') or record.get('referencia') or ''
+            referencia = (record.get('Referencia ') or  # Com espaço (como visto nos logs)
+                         record.get('Referencia') or 
+                         record.get('Referência') or 
+                         record.get('referencia') or '')
             ean = record.get('Código de Barras') or record.get('EAN') or record.get('ean') or ''
-            nome = record.get('Nome') or record.get('nome') or record.get('product_name') or ''
-            setor = record.get('Setor') or record.get('setor') or record.get('sector') or ''
+            nome = (record.get('Nome ') or  # Com espaço (como visto nos logs)
+                   record.get('Nome') or 
+                   record.get('nome') or 
+                   record.get('product_name') or '')
+            setor = (record.get('Setor ') or  # Com espaço (como visto nos logs)
+                    record.get('Setor') or 
+                    record.get('setor') or 
+                    record.get('sector') or '')
             
             # Tentar encontrar a coluna de estoque (pode ter diferentes nomes)
             estoque_atual = 0
@@ -407,8 +416,61 @@ if page == "Estoque Disponível":
             st.subheader(f"Produtos Disponíveis ({len(df_stock)} itens)")
             
             if not df_stock.empty:
-                # Mostrar tabela
-                st.dataframe(df_stock, use_container_width=True)
+                # Inicializar carrinho se não existir
+                if 'carrinho' not in st.session_state:
+                    st.session_state.carrinho = {}
+                
+                # Mostrar produtos com checkboxes para carrinho
+                for idx, row in df_stock.iterrows():
+                    col1, col2, col3, col4, col5 = st.columns([1, 3, 2, 2, 2])
+                    
+                    with col1:
+                        # Checkbox para adicionar ao carrinho
+                        product_key = f"{row.get('EAN', '')}_{idx}"
+                        adicionar = st.checkbox("🛒", key=f"add_{product_key}", 
+                                              value=product_key in st.session_state.carrinho)
+                        
+                        if adicionar and product_key not in st.session_state.carrinho:
+                            # Adicionar ao carrinho
+                            st.session_state.carrinho[product_key] = {
+                                'EAN': row.get('EAN', ''),
+                                'Referência': row.get('Referência', ''),
+                                'Produto': row.get('Produto', ''),
+                                'Setor': row.get('Setor', ''),
+                                'Quantidade': row.get('Quantidade', 0),
+                                'Fornecedor': row.get('Fornecedor', ''),
+                                'qty_pedido': 1
+                            }
+                        elif not adicionar and product_key in st.session_state.carrinho:
+                            # Remover do carrinho
+                            del st.session_state.carrinho[product_key]
+                    
+                    with col2:
+                        st.write(f"**{row.get('Produto', 'N/A')}**")
+                        if row.get('Referência'):
+                            st.caption(f"Ref: {row.get('Referência')}")
+                    
+                    with col3:
+                        st.write(f"EAN: {row.get('EAN', 'N/A')}")
+                        st.write(f"Setor: {row.get('Setor', 'N/A')}")
+                    
+                    with col4:
+                        st.write(f"Estoque: **{row.get('Quantidade', 0)}**")
+                        st.caption(f"Fornecedor: {row.get('Fornecedor', 'N/A')}")
+                    
+                    with col5:
+                        if product_key in st.session_state.carrinho:
+                            # Permitir ajustar quantidade do pedido
+                            qty_pedido = st.number_input(
+                                "Qtd Pedido", 
+                                min_value=1, 
+                                max_value=row.get('Quantidade', 1),
+                                value=st.session_state.carrinho[product_key]['qty_pedido'],
+                                key=f"qty_{product_key}"
+                            )
+                            st.session_state.carrinho[product_key]['qty_pedido'] = qty_pedido
+                    
+                    st.markdown("---")
                 
                 # Estatísticas
                 col1, col2, col3, col4 = st.columns(4)
@@ -567,7 +629,7 @@ if page == "Novo Pedido":
                 ean = row.get("EAN", "").strip()
                 quantidade = row.get("Quantidade", 1)
                 setor = row.get("Setor", "").strip()
-                obs = row.get("Observações", "").strip()
+                obs = (row.get("Observações", "") or row.get("Obs", "") or row.get("obs", "") or "").strip()
                 
                 # Pular linhas vazias
                 if not produto and not referencia and not ean:

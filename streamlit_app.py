@@ -42,74 +42,23 @@ def now_br() -> dt.datetime:
 # ============================================================================
 
 def get_sheets_client():
-    """Obtém cliente do Google Sheets"""
+    """Obtém cliente do Google Sheets usando apenas Streamlit Secrets"""
     try:
-        # Tentar carregar credenciais de diferentes fontes
-        credentials = None
-        
-        # 1. Tentar carregar de secrets do Streamlit (PRIORIDADE)
-        try:
-            if hasattr(st, 'secrets'):
-                # Opção 1: JSON completo em GOOGLE_CREDENTIALS
-                if 'GOOGLE_CREDENTIALS' in st.secrets:
-                    credentials_json = st.secrets['GOOGLE_CREDENTIALS']
-                    if isinstance(credentials_json, str):
-                        credentials_info = json.loads(credentials_json)
-                    else:
-                        credentials_info = dict(credentials_json)
-                    
-                    credentials = Credentials.from_service_account_info(
-                        credentials_info,
-                        scopes=['https://www.googleapis.com/auth/spreadsheets']
-                    )
-                    log("✅ Credenciais carregadas de Streamlit secrets (GOOGLE_CREDENTIALS)")
-                
-                # Opção 2: Campos separados no secrets
-                elif 'gcp_service_account' in st.secrets:
-                    credentials_info = dict(st.secrets['gcp_service_account'])
-                    credentials = Credentials.from_service_account_info(
-                        credentials_info,
-                        scopes=['https://www.googleapis.com/auth/spreadsheets']
-                    )
-                    log("✅ Credenciais carregadas de Streamlit secrets (gcp_service_account)")
-        except Exception as e:
-            log(f"⚠️ Erro ao carregar credenciais de Streamlit secrets: {e}")
-        
-        # 2. Tentar carregar de arquivo JSON local
-        if not credentials and os.path.exists(CREDENTIALS_JSON_PATH):
-            try:
-                credentials = Credentials.from_service_account_file(
-                    CREDENTIALS_JSON_PATH,
-                    scopes=['https://www.googleapis.com/auth/spreadsheets']
-                )
-                log(f"✅ Credenciais carregadas de arquivo JSON: {CREDENTIALS_JSON_PATH}")
-            except Exception as e:
-                log(f"⚠️ Erro ao carregar credenciais de arquivo: {e}")
-        
-        # 3. Verificar se conseguiu credenciais
-        if not credentials:
-            log("❌ ERRO: Não foi possível carregar credenciais do Google Sheets")
-            log("   Configure GOOGLE_CREDENTIALS em Streamlit Cloud secrets")
-            log("   Ou coloque o arquivo JSON em: credentials/service-account.json")
-            return None
-        
-        # 4. Tentar obter SPREADSHEET_ID
-        spreadsheet_id = SPREADSHEET_ID
-        if hasattr(st, 'secrets') and 'SPREADSHEET_ID' in st.secrets:
-            spreadsheet_id = st.secrets['SPREADSHEET_ID']
-            log(f"✅ SPREADSHEET_ID carregado de secrets: {spreadsheet_id}")
+        # Usar apenas credenciais do Streamlit secrets
+        if 'gcp_service_account' in st.secrets:
+            credentials_info = st.secrets['gcp_service_account']
+            credentials = Credentials.from_service_account_info(
+                credentials_info,
+                scopes=['https://www.googleapis.com/auth/spreadsheets']
+            )
+            log("✅ Credenciais carregadas de Streamlit secrets")
+            return gspread.authorize(credentials)
         else:
-            log(f"✅ SPREADSHEET_ID carregado de sheets_config.py: {spreadsheet_id}")
-        
-        # 5. Autorizar e retornar cliente
-        client = gspread.authorize(credentials)
-        log("✅ Cliente Google Sheets autorizado com sucesso!")
-        return client
+            log("❌ Credenciais 'gcp_service_account' não encontradas em st.secrets")
+            return None
         
     except Exception as e:
         log(f"❌ ERRO ao conectar com Google Sheets: {e}")
-        import traceback
-        log(f"   Traceback: {traceback.format_exc()}")
         return None
 
 def get_worksheet(worksheet_name):

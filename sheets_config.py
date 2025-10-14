@@ -1,10 +1,19 @@
 # sheets_config.py - Configuração do Google Sheets para Pedidos
-import os
+import streamlit as st
 
-# Variáveis de ambiente ou valores padrão
-SEND_TO_SHEETS = os.getenv("SEND_TO_SHEETS", "true").lower() == "true"
-CREDENTIALS_JSON_PATH = os.getenv("CREDENTIALS_JSON_PATH", "credentials/service-account.json")
-SPREADSHEET_ID = os.getenv("SPREADSHEET_ID", "SEU_SPREADSHEET_ID_AQUI")
+# Configurações do Google Sheets via Streamlit Secrets
+try:
+    # Tentar obter SPREADSHEET_ID dos secrets
+    if hasattr(st, 'secrets') and 'SPREADSHEET_ID' in st.secrets:
+        SPREADSHEET_ID = st.secrets['SPREADSHEET_ID']
+    else:
+        SPREADSHEET_ID = "2143406046"  # ID padrão fornecido pelo usuário
+except:
+    SPREADSHEET_ID = "2143406046"  # Fallback
+
+# Não usar arquivos locais, apenas secrets
+CREDENTIALS_JSON_PATH = None  # Não usar arquivo local
+SEND_TO_SHEETS = True
 
 # Nomes das abas na planilha
 WS_ORDERS = "Pedidos"

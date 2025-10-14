@@ -463,7 +463,7 @@ with st.sidebar:
     st.markdown("---")
     
     # Monta o menu
-    pages = ["Estoque Disponível", "Novo Pedido", "Meus Pedidos", "Histórico"]
+    pages = ["Estoque Disponível", "Novo Pedido", "Meus Pedidos"]
     page = st.radio("Módulo", pages, index=0)
     st.markdown("---")
     st.caption("© 2025 - Sistema Google Sheets")
@@ -890,9 +890,13 @@ if page == "Meus Pedidos":
             
             with col2:
                 if 'Produto' in df_orders.columns:
-                    search_term = st.text_input("Buscar Produto", placeholder="Nome do produto")
+                    search_term = st.text_input("Buscar Produto", placeholder="Nome, EAN ou referência")
                     if search_term:
-                        df_orders = df_orders[df_orders["Produto"].str.contains(search_term, case=False, na=False)]
+                        # Buscar em produto, EAN e referência
+                        mask = (df_orders["Produto"].str.contains(search_term, case=False, na=False) |
+                               df_orders["EAN"].str.contains(search_term, case=False, na=False) |
+                               df_orders["Referência"].str.contains(search_term, case=False, na=False))
+                        df_orders = df_orders[mask]
             
             with col3:
                 if 'Data/Hora' in df_orders.columns:

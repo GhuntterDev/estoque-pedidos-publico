@@ -235,12 +235,21 @@ def get_all_orders():
             # Converter para formato padronizado
             orders = []
             for i, order in enumerate(records):
-                # Mapear colunas conforme nova estrutura
+                # Log detalhado para debug
+                if i == 0:  # Log apenas o primeiro registro para ver as colunas
+                    log(f"🔍 Colunas disponíveis no primeiro registro: {list(order.keys())}")
+                
+                # Mapear colunas conforme nova estrutura - aceitar variações
+                responsavel = (order.get('Responsável', '') or 
+                             order.get('responsável', '') or 
+                             order.get('Responsavel', '') or 
+                             order.get('responsavel', '') or '')
+                
                 orders.append({
-                    'Data/Hora': order.get('Data/hora', ''),
-                    'Responsável': order.get('Responsável', ''),
-                    'Referência': order.get('Referência', ''),
-                    'EAN': order.get('Código de Barras', ''),
+                    'Data/Hora': order.get('Data/hora', '') or order.get('Data/Hora', ''),
+                    'Responsável': responsavel,
+                    'Referência': order.get('Referência', '') or order.get('Referencia', ''),
+                    'EAN': order.get('Código de Barras', '') or order.get('EAN', ''),
                     'Produto': order.get('Produto', ''),
                     'Quantidade': order.get('Quantidade', 0),
                     'Loja': order.get('Loja', ''),
@@ -250,7 +259,8 @@ def get_all_orders():
                     'Responsável Saída': order.get('Responsável Saída', ''),
                     'Obs': order.get('Obs', '')
                 })
-                log(f"📋 Pedido {i+1}: {order.get('Produto', 'N/A')} - Status: {order.get('Status', 'N/A')}")
+                
+                log(f"📋 Pedido {i+1}: Produto={order.get('Produto', 'N/A')} - Responsável='{responsavel}' - Status={order.get('Status', 'N/A')}")
             
             return orders
         return []

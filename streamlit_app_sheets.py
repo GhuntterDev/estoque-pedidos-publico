@@ -1115,14 +1115,36 @@ if page == "Meus Pedidos":
                         df_orders = df_orders[df_orders['Data'].dt.date == date_filter]
             
             # Mostrar resultados
-            st.subheader(f"Pedidos ({len(df_orders)} sessões)")
+            st.subheader(f"Pedidos ({len(df_orders)} grupos)")
             
             if not df_orders.empty:
-                # Remover colunas desnecessárias (Data temporária, Responsável e items)
-                display_columns = [col for col in df_orders.columns if col not in ['Data', 'Responsável', 'items']]
-                
-                # Tabela de pedidos (sem centralização)
-                st.dataframe(df_orders[display_columns], width='stretch')
+                # Lista expansível de pedidos
+                for idx, order in df_orders.iterrows():
+                    data_hora = order.get('Data/Hora', '')
+                    loja = order.get('Loja', '')
+                    status = order.get('Status', 'Pendente')
+                    produtos = order.get('Produtos', 0)
+                    total_itens = order.get('Total Itens', 0)
+                    
+                    # Criar título do grupo
+                    group_title = f"📅 {data_hora} - {loja} - {produtos} produtos - {total_itens} itens"
+                    
+                    # Expandir para mostrar detalhes
+                    with st.expander(group_title, expanded=False):
+                        # Mostrar informações do grupo
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.write(f"**Status:** {status}")
+                        with col2:
+                            st.write(f"**Loja:** {loja}")
+                        with col3:
+                            st.write(f"**Data/Hora:** {data_hora}")
+                        
+                        # Mostrar itens do grupo se disponível
+                        if 'items' in order and order['items']:
+                            st.write("**Itens do Pedido:**")
+                            items_df = pd.DataFrame(order['items'])
+                            st.dataframe(items_df, width='stretch')
                 
                 # Estatísticas
                 col1, col2, col3, col4 = st.columns(4)
@@ -1130,17 +1152,17 @@ if page == "Meus Pedidos":
                 with col1:
                     total_orders = len(df_orders)
                     total_items = df_orders['Total Itens'].sum() if 'Total Itens' in df_orders.columns else 0
-                    st.metric("Total de Pedidos", f"{total_orders} sessões")
+                    st.metric("Total de Grupos", total_orders)
                 
                 with col2:
                     if 'Status' in df_orders.columns:
                         pending_orders = len(df_orders[df_orders["Status"] == "Pendente"])
-                        st.metric("Pendentes", f"{pending_orders} sessões")
+                        st.metric("Pendentes", pending_orders)
                 
                 with col3:
                     if 'Status' in df_orders.columns:
                         fulfilled_orders = len(df_orders[df_orders["Status"] == "Finalizado"])
-                        st.metric("Atendidos", f"{fulfilled_orders} sessões")
+                        st.metric("Atendidos", fulfilled_orders)
                 
                 with col4:
                     total_items = df_orders['Total Itens'].sum() if 'Total Itens' in df_orders.columns else 0

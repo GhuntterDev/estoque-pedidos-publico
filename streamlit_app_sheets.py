@@ -575,10 +575,9 @@ if page == "Estoque Disponível":
                 if 'carrinho' not in st.session_state:
                     st.session_state.carrinho = {}
                 
-                # Criar DataFrame com coluna de seleção
+                # Criar DataFrame com coluna de seleção (sem quantidade)
                 df_display = df_stock.copy()
                 df_display['Selecionar'] = False
-                df_display['Qtd Pedido'] = 1
                 
                 # Converter colunas numéricas para string para evitar erro de tipo
                 df_display['Referência'] = df_display['Referência'].astype(str)
@@ -589,82 +588,144 @@ if page == "Estoque Disponível":
                     product_key = f"{row.get('EAN', '')}_{idx}"
                     if product_key in st.session_state.carrinho:
                         df_display.at[idx, 'Selecionar'] = True
-                        df_display.at[idx, 'Qtd Pedido'] = st.session_state.carrinho[product_key]['qty_pedido']
                 
-                # Configurar editor de dados
-                edited_df = st.data_editor(
-                    df_display[['Selecionar', 'Produto', 'Referência', 'EAN', 'Setor', 'Quantidade', 'Fornecedor', 'Qtd Pedido']],
-                    width='stretch',
-                    num_rows="dynamic",
-                    column_config={
-                        "Selecionar": st.column_config.CheckboxColumn(
-                            "🛒",
-                            help="Selecionar para adicionar ao carrinho",
-                            default=False,
-                        ),
-                        "Qtd Pedido": st.column_config.NumberColumn(
-                            "Qtd",
-                            help="Quantidade para pedido",
-                            min_value=1,
-                            step=1,
-                            default=1,
-                        ),
-                        "Produto": st.column_config.TextColumn(
-                            "Produto",
-                            width="medium",
-                        ),
-                        "Referência": st.column_config.TextColumn(
-                            "Ref",
-                            width="small",
-                        ),
-                        "EAN": st.column_config.TextColumn(
-                            "EAN",
-                            width="small",
-                        ),
-                        "Setor": st.column_config.TextColumn(
-                            "Setor",
-                            width="small",
-                        ),
-                        "Quantidade": st.column_config.NumberColumn(
-                            "Estoque",
-                            width="small",
-                        ),
-                        "Fornecedor": st.column_config.TextColumn(
-                            "Fornecedor",
-                            width="medium",
-                        ),
-                    },
-                    hide_index=True,
-                    key="stock_editor"
-                )
+                # Tabela principal (sem quantidade)
+                col1, col2 = st.columns([3, 1])
                 
-                # Atualizar carrinho baseado nas seleções
-                if st.button("🛒 Atualizar Carrinho", type="primary"):
-                    # Limpar carrinho atual
-                    st.session_state.carrinho = {}
+                with col1:
+                    st.markdown("**📦 Produtos Disponíveis**")
+                    edited_df = st.data_editor(
+                        df_display[['Selecionar', 'Produto', 'Referência', 'EAN', 'Setor', 'Quantidade', 'Fornecedor']],
+                        width='stretch',
+                        num_rows="dynamic",
+                        column_config={
+                            "Selecionar": st.column_config.CheckboxColumn(
+                                "🛒",
+                                help="Selecionar para adicionar ao carrinho",
+                                default=False,
+                            ),
+                            "Produto": st.column_config.TextColumn(
+                                "Produto",
+                                width="medium",
+                            ),
+                            "Referência": st.column_config.TextColumn(
+                                "Ref",
+                                width="small",
+                            ),
+                            "EAN": st.column_config.TextColumn(
+                                "EAN",
+                                width="small",
+                            ),
+                            "Setor": st.column_config.TextColumn(
+                                "Setor",
+                                width="small",
+                            ),
+                            "Quantidade": st.column_config.NumberColumn(
+                                "Estoque",
+                                width="small",
+                            ),
+                            "Fornecedor": st.column_config.TextColumn(
+                                "Fornecedor",
+                                width="medium",
+                            ),
+                        },
+                        hide_index=True,
+                        key="stock_editor"
+                    )
+                
+                with col2:
+                    st.markdown("**📝 Quantidades**")
                     
-                    # Adicionar itens selecionados
-                    for idx, row in edited_df.iterrows():
-                        if row['Selecionar'] and row['Qtd Pedido'] > 0:
+                    # Criar DataFrame de quantidades apenas para produtos selecionados
+                    selected_products = edited_df[edited_df['Selecionar'] == True]
+                    
+                    if not selected_products.empty:
+                        qty_data = []
+                        for idx, row in selected_products.iterrows():
                             original_row = df_stock.iloc[idx]
                             product_key = f"{original_row.get('EAN', '')}_{idx}"
-                            
-                            # Validar quantidade
+                            current_qty = st.session_state.carrinho.get(product_key, {}).get('qty_pedido', 1)
                             max_qty = original_row.get('Quantidade', 1)
-                            qty_pedido = min(row['Qtd Pedido'], max_qty)
                             
-                            st.session_state.carrinho[product_key] = {
-                                'EAN': original_row.get('EAN', ''),
-                                'Referência': original_row.get('Referência', ''),
-                                'Produto': original_row.get('Produto', ''),
-                                'Setor': original_row.get('Setor', ''),
-                                'Quantidade': max_qty,
-                                'Fornecedor': original_row.get('Fornecedor', ''),
-                                'qty_pedido': qty_pedido
-                            }
-                    
-                    st.success(f"🛒 {len(st.session_state.carrinho)} item(s) adicionado(s) ao carrinho!")
-                    st.rerun()
+                            qty_data.append({
+                                'Produto': original_row.get('Produto', '')[:30] + ('...' if len(original_row.get('Produto', '')) > 30 else ''),
+                                'Estoque': max_qty,
+                                'Qtd Pedido': min(current_qty, max_qty)  # Garantir que não exceda
+                            })
+                        
+                        df_qty = pd.DataFrame(qty_data)
+                        
+                        edited_qty_df = st.data_editor(
+                            df_qty,
+                            width='stretch',
+                            column_config={
+                                "Produto": st.column_config.TextColumn(
+                                    "Produto",
+                                    width="medium",
+                                    disabled=True,
+                                ),
+                                "Estoque": st.column_config.NumberColumn(
+                                    "Estoque",
+                                    width="small",
+                                    disabled=True,
+                                ),
+                                "Qtd Pedido": st.column_config.NumberColumn(
+                                    "Qtd",
+                                    help="Quantidade para pedido (máx = Estoque)",
+                                    min_value=1,
+                                    step=1,
+                                    default=1,
+                                ),
+                            },
+                            hide_index=True,
+                            key="qty_editor"
+                        )
+                    else:
+                        st.info("Selecione produtos na tabela ao lado para definir quantidades.")
+                
+                # Atualizar carrinho baseado nas seleções
+                col_btn1, col_btn2 = st.columns([1, 1])
+                
+                with col_btn1:
+                    if st.button("🛒 Atualizar Carrinho", type="primary", width='stretch'):
+                        # Limpar carrinho atual
+                        st.session_state.carrinho = {}
+                        
+                        # Adicionar itens selecionados
+                        selected_products = edited_df[edited_df['Selecionar'] == True]
+                        
+                        if not selected_products.empty and 'edited_qty_df' in locals():
+                            for idx, row in selected_products.iterrows():
+                                original_row = df_stock.iloc[idx]
+                                product_key = f"{original_row.get('EAN', '')}_{idx}"
+                                
+                                # Encontrar a quantidade correspondente
+                                qty_row = edited_qty_df.iloc[list(selected_products.index).index(idx)]
+                                qty_pedido = qty_row['Qtd Pedido']
+                                max_qty = original_row.get('Quantidade', 1)
+                                
+                                # Validar quantidade (não pode exceder estoque)
+                                if qty_pedido > max_qty:
+                                    st.error(f"❌ Quantidade {qty_pedido} excede o estoque disponível ({max_qty}) para {original_row.get('Produto', '')}")
+                                    continue
+                                
+                                st.session_state.carrinho[product_key] = {
+                                    'EAN': original_row.get('EAN', ''),
+                                    'Referência': original_row.get('Referência', ''),
+                                    'Produto': original_row.get('Produto', ''),
+                                    'Setor': original_row.get('Setor', ''),
+                                    'Quantidade': max_qty,
+                                    'Fornecedor': original_row.get('Fornecedor', ''),
+                                    'qty_pedido': qty_pedido
+                                }
+                        
+                        st.success(f"🛒 {len(st.session_state.carrinho)} item(s) adicionado(s) ao carrinho!")
+                        st.rerun()
+                
+                with col_btn2:
+                    if st.button("🗑️ Limpar Seleções", type="secondary", width='stretch'):
+                        st.session_state.carrinho = {}
+                        st.rerun()
             else:
                 st.info("📦 Nenhum produto disponível com os filtros aplicados.")
             

@@ -391,6 +391,86 @@ def get_sectors():
     """Obtém setores com cache para evitar quota exceeded"""
     return get_cached_data("sectors_data", _fetch_sectors)
 
+def group_orders_by_session(orders_data):
+    """Agrupa pedidos por data/hora e responsável para formar sessões de pedido"""
+    if not orders_data:
+        return []
+    
+    # Agrupar por data/hora e responsável
+    grouped = {}
+    for order in orders_data:
+        # Usar data/hora e responsável como chave do grupo
+        data_hora = order.get('Data/Hora', '')
+        responsavel = order.get('Responsável', '')
+        loja = order.get('Loja', '')
+        
+        # Criar chave única para o grupo (arredondar segundos para agrupar melhor)
+        try:
+            if data_hora and '/' in data_hora:
+                # Formato: DD/MM/YYYY HH:MM:SS
+                date_part, time_part = data_hora.split(' ')
+                if ':' in time_part:
+                    h, m, s = time_part.split(':')
+                    # Arredondar segundos para agrupar pedidos do mesmo minuto
+                    rounded_time = f"{h}:{m}:00"
+                    group_key = f"{date_part} {rounded_time}|{responsavel}|{loja}"
+                else:
+                    group_key = f"{data_hora}|{responsavel}|{loja}"
+            else:
+                group_key = f"{data_hora}|{responsavel}|{loja}"
+        except:
+            group_key = f"{data_hora}|{responsavel}|{loja}"
+        
+        if group_key not in grouped:
+            grouped[group_key] = {
+                'Data/Hora': data_hora,
+                'Responsável': responsavel,
+                'Loja': loja,
+                'Status': order.get('Status', 'Pendente'),
+                'Finalizado em': order.get('Finalizado em', ''),
+                'Responsável Saída': order.get('Responsável Saída', ''),
+                'items': [],
+                'total_quantity': 0
+            }
+        
+        # Adicionar item ao grupo
+        grouped[group_key]['items'].append({
+            'Produto': order.get('Produto', ''),
+            'Referência': order.get('Referência', ''),
+            'EAN': order.get('EAN', ''),
+            'Quantidade': order.get('Quantidade', 0),
+            'Setor': order.get('Setor', ''),
+            'Status': order.get('Status', 'Pendente'),
+            'Obs': order.get('Obs', '')
+        })
+        
+        # Somar quantidade total
+        try:
+            qty = int(order.get('Quantidade', 0))
+            grouped[group_key]['total_quantity'] += qty
+        except:
+            pass
+    
+    # Converter para lista de grupos
+    grouped_orders = []
+    for group_key, group_data in grouped.items():
+        grouped_orders.append({
+            'Data/Hora': group_data['Data/Hora'],
+            'Responsável': group_data['Responsável'],
+            'Loja': group_data['Loja'],
+            'Status': group_data['Status'],
+            'Finalizado em': group_data['Finalizado em'],
+            'Responsável Saída': group_data['Responsável Saída'],
+            'Produtos': len(group_data['items']),
+            'Total Itens': group_data['total_quantity'],
+            'items': group_data['items']
+        })
+    
+    # Ordenar por data/hora (mais recente primeiro)
+    grouped_orders.sort(key=lambda x: x['Data/Hora'], reverse=True)
+    
+    return grouped_orders
+
 # ============================================================================
 # FUNÇÕES DE AUTENTICAÇÃO SIMPLES
 # ============================================================================
@@ -990,11 +1070,15 @@ if page == "Meus Pedidos":
             if (order_responsavel.lower() == user_login.lower()) or (order_loja.lower() == user_store.lower()):
                 orders_data.append(order)
         
-        log(f"📋 Pedidos encontrados para {user_login}: {len(orders_data)}")
+        log(f"📋 Itens de pedidos encontrados para {user_login}: {len(orders_data)}")
         
         if orders_data:
-            # Criar DataFrame
-            df_orders = pd.DataFrame(orders_data)
+            # Agrupar pedidos por sessão (data/hora + responsável)
+            grouped_orders = group_orders_by_session(orders_data)
+            log(f"📦 Pedidos agrupados: {len(grouped_orders)} sessões")
+            
+            # Criar DataFrame dos pedidos agrupados
+            df_orders = pd.DataFrame(grouped_orders)
             
             # Filtros
             col1, col2, col3 = st.columns(3)
@@ -1031,38 +1115,36 @@ if page == "Meus Pedidos":
                         df_orders = df_orders[df_orders['Data'].dt.date == date_filter]
             
             # Mostrar resultados
-            st.subheader(f"Pedidos ({len(df_orders)} itens)")
+            st.subheader(f"Pedidos ({len(df_orders)} sessões)")
             
             if not df_orders.empty:
-                # Remover colunas desnecessárias (Data temporária e Responsável)
-                display_columns = [col for col in df_orders.columns if col not in ['Data', 'Responsável']]
+                # Remover colunas desnecessárias (Data temporária, Responsável e items)
+                display_columns = [col for col in df_orders.columns if col not in ['Data', 'Responsável', 'items']]
                 
-                # Centralizar tabela de pedidos
-                col_orders_left, col_orders_center, col_orders_right = st.columns([1, 8, 1])
-                with col_orders_center:
-                    st.dataframe(df_orders[display_columns], width='stretch')
+                # Tabela de pedidos (sem centralização)
+                st.dataframe(df_orders[display_columns], width='stretch')
                 
                 # Estatísticas
                 col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
                     total_orders = len(df_orders)
-                    st.metric("Total de Pedidos", total_orders)
+                    total_items = df_orders['Total Itens'].sum() if 'Total Itens' in df_orders.columns else 0
+                    st.metric("Total de Pedidos", f"{total_orders} sessões")
                 
                 with col2:
                     if 'Status' in df_orders.columns:
                         pending_orders = len(df_orders[df_orders["Status"] == "Pendente"])
-                        st.metric("Pendentes", pending_orders)
+                        st.metric("Pendentes", f"{pending_orders} sessões")
                 
                 with col3:
                     if 'Status' in df_orders.columns:
                         fulfilled_orders = len(df_orders[df_orders["Status"] == "Finalizado"])
-                        st.metric("Atendidos", fulfilled_orders)
+                        st.metric("Atendidos", f"{fulfilled_orders} sessões")
                 
                 with col4:
-                    if 'Status' in df_orders.columns:
-                        partial_orders = len(df_orders[df_orders["Status"] == "Parcial"])
-                        st.metric("Parciais", partial_orders)
+                    total_items = df_orders['Total Itens'].sum() if 'Total Itens' in df_orders.columns else 0
+                    st.metric("Total de Itens", total_items)
                 
                 # Exportar dados
                 csv = df_orders[display_columns].to_csv(index=False).encode('utf-8')

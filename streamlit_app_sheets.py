@@ -113,13 +113,36 @@ def get_sheets_client():
         return None
 
 def get_worksheet(name):
-    """Obtém worksheet pelo nome"""
+    """Obtém worksheet pelo nome (case-insensitive e ignorando acentos)."""
     try:
         spreadsheet = get_sheets_client()
-        if spreadsheet:
+        if not spreadsheet:
+            return None
+
+        # Tentar exato primeiro
+        try:
             ws = spreadsheet.worksheet(name)
-            log(f"✅ Worksheet '{name}' acessada com sucesso")
+            log(f"✅ Worksheet '{name}' acessada com sucesso (exata)")
             return ws
+        except Exception:
+            pass
+
+        # Procurar por normalização
+        import unicodedata
+        def _norm(s):
+            s = str(s or '')
+            return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn').lower().strip()
+
+        target = _norm(name)
+        try:
+            for ws in spreadsheet.worksheets():
+                if _norm(ws.title) == target:
+                    log(f"✅ Worksheet encontrada por normalização: '{ws.title}' para '{name}'")
+                    return ws
+        except Exception as e:
+            log(f"⚠️ Erro ao listar abas: {e}")
+        
+        log(f"❌ Worksheet não encontrada: '{name}'")
         return None
     except Exception as e:
         log(f"❌ ERRO ao obter worksheet '{name}': {e}")
@@ -284,26 +307,42 @@ def get_orders_by_store(store):
         return []
 
 def get_sectors():
-    """Obtém setores do Google Sheets"""
+    """Obtém setores do Google Sheets; se indisponível, retorna lista padrão completa."""
+    FALLBACK_SECTORS = [
+        "Bijuteria",
+        "Eletrônicos",
+        "Conveniência",
+        "Papelaria",
+        "Variedades",
+        "Utilidades",
+        "Utensílios",
+        "CaMeBa",
+        "Brinquedos",
+        "Decoração",
+        "Pet",
+        "Led",
+    ]
     try:
         ws = get_worksheet(WS_SECTORS)
-        if ws:
-            records = ws.get_all_records()
-            # Tentar diferentes formatos de coluna
-            if records and len(records) > 0:
-                first_record = records[0]
-                # Verificar qual chave usar
-                if 'nome' in first_record:
-                    return [s['nome'] for s in records if s.get('nome')]
-                elif 'Setor' in first_record:
-                    return [s['Setor'] for s in records if s.get('Setor')]
-                elif 'Nome' in first_record:
-                    return [s['Nome'] for s in records if s.get('Nome')]
-            return ["Bijuteria", "Moda", "Casa", "Outros"]
-        return ["Bijuteria", "Moda", "Casa", "Outros"]
+        if not ws:
+            log("⚠️ WS_SECTORS indisponível, usando lista padrão de setores")
+            return FALLBACK_SECTORS
+        records = ws.get_all_records()
+        if not records:
+            return FALLBACK_SECTORS
+        first_record = records[0]
+        if 'nome' in first_record:
+            values = [s['nome'] for s in records if s.get('nome')]
+        elif 'Setor' in first_record:
+            values = [s['Setor'] for s in records if s.get('Setor')]
+        elif 'Nome' in first_record:
+            values = [s['Nome'] for s in records if s.get('Nome')]
+        else:
+            values = []
+        return values or FALLBACK_SECTORS
     except Exception as e:
         log(f"❌ ERRO ao obter setores: {e}")
-        return ["Bijuteria", "Moda", "Casa", "Outros"]
+        return FALLBACK_SECTORS
 
 # ============================================================================
 # FUNÇÕES DE AUTENTICAÇÃO SIMPLES
@@ -687,93 +726,35 @@ if page == "Estoque Disponível":
 # NOVO PEDIDO
 # ============================================================================
 if page == "Novo Pedido":
-    st.header("🛒 Novo Pedido")
+    st.header("🛒 Novo Pedido em Tabela")
+    st.subheader("📋 Pedido em Tabela")
+    st.caption("Preencha as linhas abaixo. Produtos serão criados automaticamente se não existirem.")
     
-    # Opções de modo de pedido
-    modo_pedido = st.radio("Escolha o modo de pedido:", ["📝 Pedido Individual", "📋 Pedido em Tabela"], horizontal=True)
-    
-    if modo_pedido == "📝 Pedido Individual":
-        try:
-            stock_data = get_current_stock_for_orders()
-            
-            if stock_data:
-                # Criar opções de produtos
-                product_options = {}
-                for product in stock_data:
-                    if product.get('Quantidade', 0) > 0:  # Só produtos com estoque
-                        key = f"{product.get('Produto', '')} ({product.get('Referência', '')}) - Estoque: {product.get('Quantidade', 0)}"
-                        product_options[key] = (product.get('EAN', ''), product.get('Referência', ''), product.get('Produto', ''), product.get('Setor', ''), product.get('Quantidade', 0))
-                
-                with st.form("novo_pedido_form"):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        selected_product = st.selectbox("Produto", options=list(product_options.keys()))
-                        quantity = st.number_input("Quantidade", min_value=1, value=1)
-                    
-                    with col2:
-                        requested_by = st.text_input("Solicitado por", value=st.session_state.user_data['full_name'])
-                        notes = st.text_area("Observações", placeholder="Observações (opcional)")
-                    
-                    submitted = st.form_submit_button("🛒 Fazer Pedido", use_container_width=True, type="primary")
-                    
-                    if submitted:
-                        try:
-                            ean, ref, name, sector, available_qty = product_options[selected_product]
-                            
-                            if quantity > available_qty:
-                                st.error(f"❌ Quantidade solicitada ({quantity}) excede o estoque disponível ({available_qty})")
-                            else:
-                                products_data = [{
-                                    'reference': ref,
-                                    'name': name,
-                                    'quantity': quantity,
-                                    'sector': sector
-                                }]
-                                
-                                success = create_order_in_sheets(st.session_state.user_data['store'], products_data)
-                                if success:
-                                    st.success(f"✅ Pedido criado com sucesso!")
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Erro ao criar pedido.")
-                        except Exception as e:
-                            st.error(f"❌ Erro ao criar pedido: {e}")
-            else:
-                st.info("📦 Nenhum produto disponível. Entre em contato com o CD.")
-                
-        except Exception as e:
-            st.error(f"❌ Erro ao carregar produtos: {e}")
-    
-    else:  # Pedido em Tabela
-        st.subheader("📋 Pedido em Tabela")
-        st.caption("Preencha as linhas abaixo. Produtos serão criados automaticamente se não existirem.")
-        
-        # Inicializar DataFrame se não existir
-        if "pedido_df" not in st.session_state:
-            st.session_state.pedido_df = pd.DataFrame([{
+    # Inicializar DataFrame se não existir
+    if "pedido_df" not in st.session_state:
+        st.session_state.pedido_df = pd.DataFrame([{
                 "Produto": "",
                 "Referência": "",
                 "EAN": "",
                 "Quantidade": 1,
                 "Setor": get_sectors()[0] if get_sectors() else "Bijuteria",
                 "Observações": "",
-            } for _ in range(5)])
-        
-        # Editor de dados
-        df_pedido = st.data_editor(
-            st.session_state.pedido_df,
-            num_rows="dynamic",
-            use_container_width=True,
-            column_config={
-                "Quantidade": st.column_config.NumberColumn(min_value=1, step=1),
-                "Setor": st.column_config.SelectboxColumn(options=get_sectors(), required=True),
-            },
-            key="pedido_editor",
-        )
-        
-        colA, colB, colC = st.columns([1,1,1])
-        if colA.button("➕ Adicionar 5 linhas", key="add5_pedido"):
+        } for _ in range(5)])
+    
+    # Editor de dados
+    df_pedido = st.data_editor(
+        st.session_state.pedido_df,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "Quantidade": st.column_config.NumberColumn(min_value=1, step=1),
+            "Setor": st.column_config.SelectboxColumn(options=get_sectors(), required=True),
+        },
+        key="pedido_editor",
+    )
+    
+    colA, colB, colC = st.columns([1,1,1])
+    if colA.button("➕ Adicionar 5 linhas", key="add5_pedido"):
             extra = pd.DataFrame([{
                 "Produto": "",
                 "Referência": "",
@@ -784,9 +765,9 @@ if page == "Novo Pedido":
             } for _ in range(5)])
             st.session_state.pedido_df = pd.concat([st.session_state.pedido_df, extra], ignore_index=True)
             st.rerun()
-        
-        if colB.button("🗑️ Limpar Tabela", key="clear_pedido", type="secondary"):
-            st.session_state.pedido_df = pd.DataFrame([{
+    
+    if colB.button("🗑️ Limpar Tabela", key="clear_pedido", type="secondary"):
+        st.session_state.pedido_df = pd.DataFrame([{
                 "Produto": "",
                 "Referência": "",
                 "EAN": "",
@@ -794,17 +775,17 @@ if page == "Novo Pedido":
                 "Setor": get_sectors()[0] if get_sectors() else "Bijuteria",
                 "Observações": "",
             } for _ in range(5)])
-            st.success("Tabela limpa!")
-            st.rerun()
+        st.success("Tabela limpa!")
+        st.rerun()
+    
+    if colC.button("🛒 Fazer Pedido em Lote", key="pedido_lote", type="primary"):
+        st.session_state.pedido_df = df_pedido.copy()
+        linhas = df_pedido.to_dict(orient="records")
         
-        if colC.button("🛒 Fazer Pedido em Lote", key="pedido_lote", type="primary"):
-            st.session_state.pedido_df = df_pedido.copy()
-            linhas = df_pedido.to_dict(orient="records")
-            
-            pedidos_criados = 0
-            erros = []
-            
-            for i, row in enumerate(linhas):
+        pedidos_criados = 0
+        erros = []
+        
+        for i, row in enumerate(linhas):
                 produto = row.get("Produto", "").strip()
                 referencia = row.get("Referência", "").strip()
                 ean = row.get("EAN", "").strip()
@@ -837,16 +818,16 @@ if page == "Novo Pedido":
                         
                 except Exception as e:
                     erros.append(f"Linha {i+1}: {str(e)}")
-            
-            if erros:
-                st.warning(f"⚠️ {len(erros)} erro(s) encontrado(s):")
-                for erro in erros:
-                    st.warning(f"  • {erro}")
-            
-            if pedidos_criados > 0:
-                st.success(f"✅ {pedidos_criados} pedido(s) criado(s) com sucesso!")
-            elif not erros:
-                st.info("Nenhuma linha válida para processar.")
+        
+        if erros:
+            st.warning(f"⚠️ {len(erros)} erro(s) encontrado(s):")
+            for erro in erros:
+                st.warning(f"  • {erro}")
+        
+        if pedidos_criados > 0:
+            st.success(f"✅ {pedidos_criados} pedido(s) criado(s) com sucesso!")
+        elif not erros:
+            st.info("Nenhuma linha válida para processar.")
 
 # ============================================================================
 # MEUS PEDIDOS

@@ -274,14 +274,14 @@ def create_order_in_sheets(store, products_data):
                     responsavel,                        # 2: Responsável
                     str(product.get('reference', '')),  # 3: Referência
                     str(product.get('ean', '')),        # 4: Código de Barras
-                    str(product.get('product_name', '')), # 5: Produto
+                    str(product.get('name', '') or product.get('product_name', '')), # 5: Produto
                     int(product.get('quantity', 0)),     # 6: Quantidade (converter para int nativo)
                     str(store),                         # 7: Loja
                     str(product.get('sector', '')),     # 8: Setor
                     "Pendente",                         # 9: Status
                     "",                                 # 10: Finalizado em (vazio para pendente)
                     "",                                 # 11: Responsável Saída (vazio para pendente)
-                    ""                                  # 12: Obs (vazio)
+                    str(product.get('obs', ''))         # 12: Obs
                 ]
                 ws.append_row(row)
             log(f"✅ Pedido criado no Google Sheets para {store} - {len(products_data)} itens")
@@ -846,8 +846,7 @@ if page == "Estoque Disponível":
 # NOVO PEDIDO
 # ============================================================================
 if page == "Novo Pedido":
-    st.header("🛒 Novo Pedido em Tabela")
-    st.subheader("📋 Pedido em Tabela")
+    st.header("🛒 Novo Pedido")
     st.caption("Preencha as linhas abaixo. Produtos serão criados automaticamente se não existirem.")
     
     # Inicializar DataFrame se não existir
@@ -861,11 +860,8 @@ if page == "Novo Pedido":
                 "Observações": "",
         } for _ in range(5)])
     
-    # Centralizar tabela de novo pedido
-    col_new_left, col_new_center, col_new_right = st.columns([1, 8, 1])
-    with col_new_center:
-        # Editor de dados
-        df_pedido = st.data_editor(
+    # Editor de dados
+    df_pedido = st.data_editor(
             st.session_state.pedido_df,
             num_rows="dynamic",
             width='stretch',
@@ -905,50 +901,68 @@ if page == "Novo Pedido":
         st.session_state.pedido_df = df_pedido.copy()
         linhas = df_pedido.to_dict(orient="records")
         
-        pedidos_criados = 0
+        # Validar e coletar produtos válidos
+        produtos_validos = []
         erros = []
         
         for i, row in enumerate(linhas):
-                produto = row.get("Produto", "").strip()
-                referencia = row.get("Referência", "").strip()
-                ean = row.get("EAN", "").strip()
-                quantidade = row.get("Quantidade", 1)
-                setor = row.get("Setor", "").strip()
-                obs = (row.get("Observações", "") or row.get("Obs", "") or row.get("obs", "") or "").strip()
-                
-                # Pular linhas vazias
-                if not produto and not referencia and not ean:
-                    continue
-                
-                # Validação mínima
-                if not produto or not setor:
-                    erros.append(f"Linha {i+1}: Produto e Setor são obrigatórios")
-                    continue
-                
-                try:
-                    products_data = [{
-                        'reference': referencia,
-                        'name': produto,
-                        'quantity': quantidade,
-                        'sector': setor
-                    }]
-                    
-                    success = create_order_in_sheets(st.session_state.user_data['store'], products_data)
-                    if success:
-                        pedidos_criados += 1
-                    else:
-                        erros.append(f"Linha {i+1}: Erro ao criar pedido")
-                        
-                except Exception as e:
-                    erros.append(f"Linha {i+1}: {str(e)}")
+            produto = row.get("Produto", "").strip()
+            referencia = row.get("Referência", "").strip()
+            ean = row.get("EAN", "").strip()
+            quantidade = row.get("Quantidade", 1)
+            setor = row.get("Setor", "").strip()
+            obs = (row.get("Observações", "") or row.get("Obs", "") or row.get("obs", "") or "").strip()
+            
+            # Pular linhas vazias
+            if not produto and not referencia and not ean:
+                continue
+            
+            # Validação obrigatória: EAN deve estar preenchido
+            if not ean:
+                erros.append(f"Linha {i+1}: EAN é obrigatório")
+                continue
+            
+            # Validação mínima
+            if not produto or not setor:
+                erros.append(f"Linha {i+1}: Produto e Setor são obrigatórios")
+                continue
+            
+            # Adicionar à lista de produtos válidos
+            produtos_validos.append({
+                'reference': referencia,
+                'ean': ean,
+                'name': produto,
+                'quantity': quantidade,
+                'sector': setor,
+                'obs': obs
+            })
         
+        # Mostrar erros se houver
         if erros:
             st.warning(f"⚠️ {len(erros)} erro(s) encontrado(s):")
             for erro in erros:
                 st.warning(f"  • {erro}")
         
-        if pedidos_criados > 0:
-            st.success(f"✅ {pedidos_criados} pedido(s) criado(s) com sucesso!")
+        # Criar pedido em grupo se houver produtos válidos
+        if produtos_validos:
+            try:
+                success = create_order_in_sheets(st.session_state.user_data['store'], produtos_validos)
+                if success:
+                    st.success(f"✅ Pedido em grupo criado com sucesso! ({len(produtos_validos)} produtos)")
+                    # Limpar tabela após sucesso
+                    st.session_state.pedido_df = pd.DataFrame([{
+                        "Produto": "",
+                        "Referência": "",
+                        "EAN": "",
+                        "Quantidade": 1,
+                        "Setor": get_sectors()[0] if get_sectors() else "Bijuteria",
+                        "Observações": "",
+                    } for _ in range(5)])
+                    st.rerun()
+                else:
+                    st.error("❌ Erro ao criar pedido em grupo")
+            except Exception as e:
+                st.error(f"❌ Erro ao criar pedido: {str(e)}")
         elif not erros:
             st.info("Nenhuma linha válida para processar.")
 

@@ -591,12 +591,8 @@ if page == "Estoque Disponível":
                         df_display.at[idx, 'Selecionar'] = True
                         df_display.at[idx, 'Qtd Pedido'] = st.session_state.carrinho[product_key].get('qty_pedido', 1)
                 
-                # Preparar colunas dinamicamente baseado em seleções
-                columns_to_show = ['Selecionar', 'Produto', 'Referência', 'EAN', 'Setor', 'Quantidade', 'Fornecedor']
-                
-                # Verificar se há produtos selecionados para mostrar coluna de quantidade
-                if not df_display[df_display['Selecionar'] == True].empty:
-                    columns_to_show.append('Qtd Pedido')
+                # Preparar colunas - sempre incluir coluna de quantidade
+                columns_to_show = ['Selecionar', 'Produto', 'Referência', 'EAN', 'Setor', 'Quantidade', 'Qtd Pedido', 'Fornecedor']
                 
                 st.markdown("**📦 Produtos Disponíveis**")
                 edited_df = st.data_editor(
@@ -641,6 +637,7 @@ if page == "Estoque Disponível":
                             step=1,
                             default=1,
                             width="small",
+                            disabled=lambda row: not row["Selecionar"],  # Desabilitar quando não selecionado
                         ),
                     },
                     hide_index=True,

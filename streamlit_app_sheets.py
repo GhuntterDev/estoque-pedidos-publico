@@ -648,9 +648,7 @@ if page == "Estoque Disponível":
                             max_qty = original_row.get('Quantidade', 1)
                             
                             qty_data.append({
-                                'Produto': original_row.get('Produto', '')[:30] + ('...' if len(original_row.get('Produto', '')) > 30 else ''),
-                                'Estoque': max_qty,
-                                'Qtd Pedido': min(current_qty, max_qty)  # Garantir que não exceda
+                                'Quantidade': min(current_qty, max_qty)  # Garantir que não exceda
                             })
                         
                         df_qty = pd.DataFrame(qty_data)
@@ -659,19 +657,9 @@ if page == "Estoque Disponível":
                             df_qty,
                             width='stretch',
                             column_config={
-                                "Produto": st.column_config.TextColumn(
-                                    "Produto",
-                                    width="medium",
-                                    disabled=True,
-                                ),
-                                "Estoque": st.column_config.NumberColumn(
-                                    "Estoque",
-                                    width="small",
-                                    disabled=True,
-                                ),
-                                "Qtd Pedido": st.column_config.NumberColumn(
-                                    "Qtd",
-                                    help="Quantidade para pedido (máx = Estoque)",
+                                "Quantidade": st.column_config.NumberColumn(
+                                    "Quantidade",
+                                    help="Quantidade para pedido",
                                     min_value=1,
                                     step=1,
                                     default=1,
@@ -695,13 +683,12 @@ if page == "Estoque Disponível":
                         selected_products = edited_df[edited_df['Selecionar'] == True]
                         
                         if not selected_products.empty and 'edited_qty_df' in locals():
-                            for idx, row in selected_products.iterrows():
+                            for i, (idx, row) in enumerate(selected_products.iterrows()):
                                 original_row = df_stock.iloc[idx]
                                 product_key = f"{original_row.get('EAN', '')}_{idx}"
                                 
-                                # Encontrar a quantidade correspondente
-                                qty_row = edited_qty_df.iloc[list(selected_products.index).index(idx)]
-                                qty_pedido = qty_row['Qtd Pedido']
+                                # Obter a quantidade correspondente (mesma ordem)
+                                qty_pedido = edited_qty_df.iloc[i]['Quantidade']
                                 max_qty = original_row.get('Quantidade', 1)
                                 
                                 # Validar quantidade (não pode exceder estoque)

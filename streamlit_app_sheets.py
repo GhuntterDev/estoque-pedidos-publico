@@ -595,11 +595,15 @@ if page == "Estoque Disponível":
                 columns_to_show = ['Selecionar', 'Produto', 'Referência', 'EAN', 'Setor', 'Quantidade', 'Fornecedor', 'Qtd Pedido']
                 
                 st.markdown("**📦 Produtos Disponíveis**")
-                edited_df = st.data_editor(
-                    df_display[columns_to_show],
-                    width='stretch',
-                    num_rows="dynamic",
-                    column_config={
+                
+                # Centralizar tabela de produtos
+                col_left, col_center, col_right = st.columns([1, 8, 1])
+                with col_center:
+                    edited_df = st.data_editor(
+                        df_display[columns_to_show],
+                        width='stretch',
+                        num_rows="dynamic",
+                        column_config={
                         "Selecionar": st.column_config.CheckboxColumn(
                             "🛒",
                             help="Selecionar para adicionar ao carrinho",
@@ -638,13 +642,16 @@ if page == "Estoque Disponível":
                             default=1,
                             width="small",
                         ),
-                    },
-                    hide_index=True,
-                    key="stock_editor"
-                )
+                        },
+                        hide_index=True,
+                        key="stock_editor"
+                    )
                 
-                # Atualizar carrinho baseado nas seleções
-                col_btn1, col_btn2 = st.columns([1, 1])
+                # Centralizar botões
+                col_btn_left, col_btn_center, col_btn_right = st.columns([2, 2, 2])
+                with col_btn_center:
+                    # Atualizar carrinho baseado nas seleções
+                    col_btn1, col_btn2 = st.columns([1, 1])
                 
                 with col_btn1:
                     if st.button("🛒 Atualizar Carrinho", type="primary", width='stretch'):
@@ -685,10 +692,10 @@ if page == "Estoque Disponível":
                         st.success(f"🛒 {len(st.session_state.carrinho)} item(s) adicionado(s) ao carrinho!")
                         st.rerun()
                 
-                with col_btn2:
-                    if st.button("🗑️ Limpar Seleções", type="secondary", width='stretch'):
-                        st.session_state.carrinho = {}
-                        st.rerun()
+                    with col_btn2:
+                        if st.button("🗑️ Limpar Seleções", type="secondary", width='stretch'):
+                            st.session_state.carrinho = {}
+                            st.rerun()
             else:
                 st.info("📦 Nenhum produto disponível com os filtros aplicados.")
             
@@ -697,84 +704,87 @@ if page == "Estoque Disponível":
                 st.markdown("---")
                 st.subheader("🛒 Carrinho de Pedidos")
                 
-                # Mostrar itens do carrinho
-                total_carrinho = 0
-                total_itens_carrinho = 0
-                
-                for product_key, item in st.session_state.carrinho.items():
-                    col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+                # Centralizar seção do carrinho
+                col_cart_left, col_cart_center, col_cart_right = st.columns([1, 8, 1])
+                with col_cart_center:
+                    # Mostrar itens do carrinho
+                    total_carrinho = 0
+                    total_itens_carrinho = 0
                     
+                    for product_key, item in st.session_state.carrinho.items():
+                        col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+                        
+                        with col1:
+                            st.write(f"**{item['Produto']}**")
+                            st.caption(f"EAN: {item['EAN']} | Ref: {item['Referência']}")
+                        
+                        with col2:
+                            st.write(f"Setor: {item['Setor']}")
+                            st.caption(f"Fornecedor: {item['Fornecedor']}")
+                        
+                        with col3:
+                            st.write(f"Estoque: {item['Quantidade']}")
+                            st.write(f"**Qtd Pedido: {item['qty_pedido']}**")
+                        
+                        with col4:
+                            if st.button("❌", key=f"remove_{product_key}", help="Remover do carrinho"):
+                                del st.session_state.carrinho[product_key]
+                                st.rerun()
+                        
+                        total_carrinho += item['qty_pedido']
+                        total_itens_carrinho += 1
+                
+                    # Resumo do carrinho
+                    st.markdown("---")
+                    col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+                
                     with col1:
-                        st.write(f"**{item['Produto']}**")
-                        st.caption(f"EAN: {item['EAN']} | Ref: {item['Referência']}")
+                        st.metric("Itens no Carrinho", total_itens_carrinho)
                     
                     with col2:
-                        st.write(f"Setor: {item['Setor']}")
-                        st.caption(f"Fornecedor: {item['Fornecedor']}")
+                        st.metric("Quantidade Total", total_carrinho)
                     
                     with col3:
-                        st.write(f"Estoque: {item['Quantidade']}")
-                        st.write(f"**Qtd Pedido: {item['qty_pedido']}**")
-                    
-                    with col4:
-                        if st.button("❌", key=f"remove_{product_key}", help="Remover do carrinho"):
-                            del st.session_state.carrinho[product_key]
+                        if st.button("🗑️ Limpar Carrinho", type="secondary"):
+                            st.session_state.carrinho = {}
                             st.rerun()
                     
-                    total_carrinho += item['qty_pedido']
-                    total_itens_carrinho += 1
-                
-                # Resumo do carrinho
-                st.markdown("---")
-                col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
-                
-                with col1:
-                    st.metric("Itens no Carrinho", total_itens_carrinho)
-                
-                with col2:
-                    st.metric("Quantidade Total", total_carrinho)
-                
-                with col3:
-                    if st.button("🗑️ Limpar Carrinho", type="secondary"):
-                        st.session_state.carrinho = {}
-                        st.rerun()
-                
-                with col4:
-                    if st.button("📝 Criar Pedido", type="primary"):
-                        # Criar pedido
-                        try:
-                            # Dados do pedido
-                            order_data = {
-                                'store': 'CD',  # Pode ser configurável
-                                'items': [],
-                                'total': total_carrinho,
-                                'status': 'pending',
-                                'notes': f'Pedido criado via app - {total_itens_carrinho} itens'
-                            }
+                    with col4:
+                        if st.button("📝 Criar Pedido", type="primary"):
+                            # Criar pedido
+                            try:
+                                # Dados do pedido
+                                order_data = {
+                                    'store': 'CD',  # Pode ser configurável
+                                    'items': [],
+                                    'total': total_carrinho,
+                                    'status': 'pending',
+                                    'notes': f'Pedido criado via app - {total_itens_carrinho} itens'
+                                }
+                                
+                                # Adicionar itens do carrinho
+                                for product_key, item in st.session_state.carrinho.items():
+                                    order_data['items'].append({
+                                        'ean': item['EAN'],
+                                        'product_name': item['Produto'],
+                                        'reference': item['Referência'],
+                                        'sector': item['Setor'],
+                                        'quantity': item['qty_pedido'],
+                                        'supplier': item['Fornecedor']
+                                    })
+                                
+                                # Salvar pedido no Google Sheets
+                                success = create_order_in_sheets(order_data['store'], order_data['items'])
+                                
+                                if success:
+                                    st.success(f"✅ Pedido criado com sucesso! {total_itens_carrinho} itens, {total_carrinho} unidades.")
+                                    st.session_state.carrinho = {}  # Limpar carrinho
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Erro ao criar pedido. Tente novamente.")
                             
-                            # Adicionar itens do carrinho
-                            for product_key, item in st.session_state.carrinho.items():
-                                order_data['items'].append({
-                                    'ean': item['EAN'],
-                                    'product_name': item['Produto'],
-                                    'reference': item['Referência'],
-                                    'sector': item['Setor'],
-                                    'quantity': item['qty_pedido'],
-                                    'supplier': item['Fornecedor']
-                                })
-                            
-                            # Salvar pedido no Google Sheets
-                            success = create_order_in_sheets(order_data['store'], order_data['items'])
-                            
-                            if success:
-                                st.success(f"✅ Pedido criado com sucesso! {total_itens_carrinho} itens, {total_carrinho} unidades.")
-                                st.session_state.carrinho = {}  # Limpar carrinho
-                                st.rerun()
-                            else:
-                                st.error("❌ Erro ao criar pedido. Tente novamente.")
-                        
-                        except Exception as e:
-                            st.error(f"❌ Erro ao criar pedido: {str(e)}")
+                            except Exception as e:
+                                st.error(f"❌ Erro ao criar pedido: {str(e)}")
         
         else:
             st.info("📦 Nenhum produto disponível. Entre em contato com o CD.")
@@ -802,17 +812,20 @@ if page == "Novo Pedido":
                 "Observações": "",
         } for _ in range(5)])
     
-    # Editor de dados
-    df_pedido = st.data_editor(
-        st.session_state.pedido_df,
-        num_rows="dynamic",
-        width='stretch',
-        column_config={
-            "Quantidade": st.column_config.NumberColumn(min_value=1, step=1),
-            "Setor": st.column_config.SelectboxColumn(options=get_sectors(), required=True),
-        },
-        key="pedido_editor",
-    )
+    # Centralizar tabela de novo pedido
+    col_new_left, col_new_center, col_new_right = st.columns([1, 8, 1])
+    with col_new_center:
+        # Editor de dados
+        df_pedido = st.data_editor(
+            st.session_state.pedido_df,
+            num_rows="dynamic",
+            width='stretch',
+            column_config={
+                "Quantidade": st.column_config.NumberColumn(min_value=1, step=1),
+                "Setor": st.column_config.SelectboxColumn(options=get_sectors(), required=True),
+            },
+            key="pedido_editor",
+        )
     
     colA, colB, colC = st.columns([1,1,1])
     if colA.button("➕ Adicionar 5 linhas", key="add5_pedido"):
@@ -960,7 +973,11 @@ if page == "Meus Pedidos":
             if not df_orders.empty:
                 # Remover colunas desnecessárias (Data temporária e Responsável)
                 display_columns = [col for col in df_orders.columns if col not in ['Data', 'Responsável']]
-                st.dataframe(df_orders[display_columns], width='stretch')
+                
+                # Centralizar tabela de pedidos
+                col_orders_left, col_orders_center, col_orders_right = st.columns([1, 8, 1])
+                with col_orders_center:
+                    st.dataframe(df_orders[display_columns], width='stretch')
                 
                 # Estatísticas
                 col1, col2, col3, col4 = st.columns(4)
@@ -1060,7 +1077,11 @@ if page == "Histórico":
             if not df_orders.empty:
                 # Remover colunas desnecessárias (Data temporária e Responsável)
                 display_columns = [col for col in df_orders.columns if col not in ['Data', 'Responsável']]
-                st.dataframe(df_orders[display_columns], width='stretch')
+                
+                # Centralizar tabela de pedidos
+                col_orders_left, col_orders_center, col_orders_right = st.columns([1, 8, 1])
+                with col_orders_center:
+                    st.dataframe(df_orders[display_columns], width='stretch')
                 
                 # Estatísticas
                 col1, col2, col3, col4 = st.columns(4)

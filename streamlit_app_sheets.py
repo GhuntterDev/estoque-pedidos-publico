@@ -1169,7 +1169,9 @@ if page == "Meus Pedidos":
                     st.metric("Total de Itens", total_items)
                 
                 # Exportar dados
-                csv = df_orders[display_columns].to_csv(index=False).encode('utf-8')
+                # Remover colunas desnecessárias para exportação
+                export_columns = [col for col in df_orders.columns if col not in ['Data', 'Responsável', 'items']]
+                csv = df_orders[export_columns].to_csv(index=False).encode('utf-8')
                 st.download_button(
                     label="📥 Exportar Meus Pedidos",
                     data=csv,

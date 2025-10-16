@@ -10,11 +10,37 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
+import time
 
 # Configurações do Google Sheets
 from sheets_config import *
 
 sys.stdout.reconfigure(line_buffering=True)
+
+# Sistema de cache simples para evitar quota exceeded
+CACHE_DURATION = 300  # 5 minutos
+cache = {}
+
+def get_cached_data(key: str, fetch_func, *args, **kwargs):
+    """Cache simples para evitar muitas chamadas à API"""
+    current_time = time.time()
+    
+    if key in cache:
+        data, timestamp = cache[key]
+        if current_time - timestamp < CACHE_DURATION:
+            return data
+    
+    try:
+        data = fetch_func(*args, **kwargs)
+        cache[key] = (data, current_time)
+        return data
+    except Exception as e:
+        # Se der erro, retornar dados do cache mesmo que expirados
+        if key in cache:
+            data, _ = cache[key]
+            st.warning(f"⚠️ Usando dados em cache devido a erro na API: {str(e)[:100]}")
+            return data
+        raise e
 
 # CSS para centralizar conteúdo das tabelas
 st.markdown("""
@@ -163,15 +189,15 @@ def get_worksheet(name):
         log(f"❌ ERRO ao obter worksheet '{name}': {e}")
         return None
 
-def get_current_stock_for_orders():
-    """Obtém estoque atual diretamente da aba 'Saldos' do Google Sheets"""
+def _fetch_stock_data():
+    """Função interna para buscar dados de estoque"""
     try:
         # Obter dados diretamente da aba 'Saldo'
         ws_saldos = get_worksheet("Saldo")
         if not ws_saldos:
             log("❌ Aba 'Saldo' não encontrada")
             return []
-        
+            
         records = ws_saldos.get_all_records()
         log(f"✅ {len(records)} registros encontrados na aba 'Saldo'")
         
@@ -222,9 +248,11 @@ def get_current_stock_for_orders():
         
     except Exception as e:
         log(f"❌ ERRO ao carregar estoque da aba 'Saldo': {e}")
-        import traceback
-        log(f"   Traceback: {traceback.format_exc()}")
         return []
+
+def get_current_stock_for_orders():
+    """Obtém estoque atual com cache para evitar quota exceeded"""
+    return get_cached_data("stock_data", _fetch_stock_data)
 
 def create_order_in_sheets(store, products_data):
     """Cria pedido no Google Sheets com ordem correta das colunas"""
@@ -321,8 +349,8 @@ def get_orders_by_store(store):
         log(f"❌ ERRO ao obter pedidos da loja {store}: {e}")
         return []
 
-def get_sectors():
-    """Obtém setores do Google Sheets; se indisponível, retorna lista padrão completa."""
+def _fetch_sectors():
+    """Função interna para buscar setores"""
     FALLBACK_SECTORS = [
         "Bijuteria",
         "Eletrônicos",
@@ -358,6 +386,10 @@ def get_sectors():
     except Exception as e:
         log(f"❌ ERRO ao obter setores: {e}")
         return FALLBACK_SECTORS
+
+def get_sectors():
+    """Obtém setores com cache para evitar quota exceeded"""
+    return get_cached_data("sectors_data", _fetch_sectors)
 
 # ============================================================================
 # FUNÇÕES DE AUTENTICAÇÃO SIMPLES
@@ -516,6 +548,14 @@ with st.sidebar:
     
     st.markdown("---")
     
+    # Botão para limpar cache (útil em caso de quota exceeded)
+    if st.button("🔄 Limpar Cache", help="Limpa o cache de dados para forçar nova busca"):
+        cache.clear()
+        st.success("Cache limpo! Os dados serão recarregados.")
+        st.rerun()
+    
+    st.markdown("---")
+    
     # Monta o menu
     pages = ["Estoque Disponível", "Novo Pedido", "Meus Pedidos"]
     page = st.radio("Módulo", pages, index=0)
@@ -611,10 +651,7 @@ if page == "Estoque Disponível":
                 
                 st.markdown("**📦 Produtos Disponíveis**")
                 
-                # Centralizar tabela de produtos
-                col_left, col_center, col_right = st.columns([1, 8, 1])
-                with col_center:
-                    edited_df = st.data_editor(
+                edited_df = st.data_editor(
                         df_display[columns_to_show],
                         width='stretch',
                         num_rows="dynamic",
@@ -662,11 +699,8 @@ if page == "Estoque Disponível":
                         key="stock_editor"
                     )
                 
-                # Centralizar botões
-                col_btn_left, col_btn_center, col_btn_right = st.columns([2, 2, 2])
-                with col_btn_center:
-                    # Atualizar carrinho baseado nas seleções
-                    col_btn1, col_btn2 = st.columns([1, 1])
+                # Atualizar carrinho baseado nas seleções
+                col_btn1, col_btn2 = st.columns([1, 1])
                 
                 with col_btn1:
                     if st.button("🛒 Atualizar Carrinho", type="primary", width='stretch'):

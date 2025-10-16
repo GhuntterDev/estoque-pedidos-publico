@@ -862,14 +862,14 @@ if page == "Meus Pedidos":
         log(f"🔍 Buscando pedidos para usuário: {user_login}, loja: {user_store}")
         
         all_orders = get_all_orders()
-        # Filtrar por responsável (usuário logado) ou por loja
+        # Filtrar por responsável (usuário logado) ou por loja (case-insensitive)
         orders_data = []
         for order in all_orders:
-            order_responsavel = order.get('Responsável', '').strip()
-            order_loja = order.get('Loja', '').strip()
+            order_responsavel = str(order.get('Responsável', '')).strip()
+            order_loja = str(order.get('Loja', '')).strip()
             
             # Se o responsável for o usuário logado OU se a loja for a mesma
-            if (order_responsavel == user_login) or (order_loja == user_store):
+            if (order_responsavel.lower() == user_login.lower()) or (order_loja.lower() == user_store.lower()):
                 orders_data.append(order)
         
         log(f"📋 Pedidos encontrados para {user_login}: {len(orders_data)}")
@@ -883,8 +883,13 @@ if page == "Meus Pedidos":
             
             with col1:
                 if 'Status' in df_orders.columns:
-                    status_options = ["Todos"] + list(df_orders["Status"].unique())
-                    status_filter = st.selectbox("Filtrar por Status", status_options)
+                    # Normalizar status para opções consistentes
+                    def norm_status(s):
+                        return str(s or '').strip().title()
+                    normalized_status = df_orders['Status'].apply(norm_status)
+                    df_orders['Status'] = normalized_status
+                    status_options = ["Todos"] + sorted(list(df_orders["Status"].unique()))
+                    status_filter = st.selectbox("Filtrar por Status", status_options, index=0)
                     if status_filter != "Todos":
                         df_orders = df_orders[df_orders["Status"] == status_filter]
             
@@ -900,10 +905,12 @@ if page == "Meus Pedidos":
             
             with col3:
                 if 'Data/Hora' in df_orders.columns:
-                    date_filter = st.date_input("Filtrar por Data", value=dt.date.today())
-                    # Filtrar por data (formato DD/MM/YYYY HH:MM:SS)
-                    df_orders['Data'] = pd.to_datetime(df_orders['Data/Hora'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
-                    df_orders = df_orders[df_orders['Data'].dt.date == date_filter]
+                    use_date_filter = st.checkbox("Filtrar por Data de Criação", value=False)
+                    if use_date_filter:
+                        date_filter = st.date_input("Data", value=dt.date.today(), key="meus_pedidos_date")
+                        # Filtrar por data (formato DD/MM/YYYY HH:MM:SS)
+                        df_orders['Data'] = pd.to_datetime(df_orders['Data/Hora'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
+                        df_orders = df_orders[df_orders['Data'].dt.date == date_filter]
             
             # Mostrar resultados
             st.subheader(f"Pedidos ({len(df_orders)} itens)")

@@ -591,8 +591,8 @@ if page == "Estoque Disponível":
                         df_display.at[idx, 'Selecionar'] = True
                         df_display.at[idx, 'Qtd Pedido'] = st.session_state.carrinho[product_key].get('qty_pedido', 1)
                 
-                # Preparar colunas - sempre incluir coluna de quantidade
-                columns_to_show = ['Selecionar', 'Produto', 'Referência', 'EAN', 'Setor', 'Quantidade', 'Qtd Pedido', 'Fornecedor']
+                # Preparar colunas - sempre incluir coluna de quantidade na última posição
+                columns_to_show = ['Selecionar', 'Produto', 'Referência', 'EAN', 'Setor', 'Quantidade', 'Fornecedor', 'Qtd Pedido']
                 
                 st.markdown("**📦 Produtos Disponíveis**")
                 edited_df = st.data_editor(

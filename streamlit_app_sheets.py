@@ -589,8 +589,8 @@ if page == "Estoque Disponível":
                     if product_key in st.session_state.carrinho:
                         df_display.at[idx, 'Selecionar'] = True
                 
-                # Tabela principal (sem quantidade)
-                col1, col2 = st.columns([3, 1])
+                # Tabela principal (sem quantidade) - coluna de quantidades reduzida
+                col1, col2 = st.columns([4, 1])
                 
                 with col1:
                     st.markdown("**📦 Produtos Disponíveis**")
@@ -634,7 +634,7 @@ if page == "Estoque Disponível":
                     )
                 
                 with col2:
-                    st.markdown("**📝 Quantidades**")
+                    st.markdown("**📝 Qtd**")
                     
                     # Criar DataFrame de quantidades apenas para produtos selecionados
                     selected_products = edited_df[edited_df['Selecionar'] == True]
@@ -656,20 +656,22 @@ if page == "Estoque Disponível":
                         edited_qty_df = st.data_editor(
                             df_qty,
                             width='stretch',
+                            num_rows="fixed",
                             column_config={
                                 "Quantidade": st.column_config.NumberColumn(
-                                    "Quantidade",
-                                    help="Quantidade para pedido",
+                                    "Qtd",
+                                    help="Qtd pedido",
                                     min_value=1,
                                     step=1,
                                     default=1,
+                                    width="small",
                                 ),
                             },
                             hide_index=True,
                             key="qty_editor"
                         )
                     else:
-                        st.info("Selecione produtos na tabela ao lado para definir quantidades.")
+                        st.info("Selecione produtos.")
                 
                 # Atualizar carrinho baseado nas seleções
                 col_btn1, col_btn2 = st.columns([1, 1])

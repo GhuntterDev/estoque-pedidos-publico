@@ -637,7 +637,6 @@ if page == "Estoque Disponível":
                             step=1,
                             default=1,
                             width="small",
-                            disabled=lambda row: not row["Selecionar"],  # Desabilitar quando não selecionado
                         ),
                     },
                     hide_index=True,
@@ -657,6 +656,10 @@ if page == "Estoque Disponível":
                         
                         if not selected_products.empty:
                             for idx, row in selected_products.iterrows():
+                                # Verificar se realmente está selecionado
+                                if not row.get('Selecionar', False):
+                                    continue
+                                    
                                 original_row = df_stock.iloc[idx]
                                 product_key = f"{original_row.get('EAN', '')}_{idx}"
                                 

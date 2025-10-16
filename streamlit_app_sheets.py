@@ -441,7 +441,7 @@ if not st.session_state.authenticated:
         with st.form("login_form"):
             login = st.text_input("Usuário", placeholder="Digite seu login")
             password = st.text_input("Senha", type="password", placeholder="Digite sua senha")
-            submit = st.form_submit_button("Entrar", use_container_width=True)
+            submit = st.form_submit_button("Entrar", width='stretch')
             
             if submit:
                 # Limpar espaços em branco dos campos
@@ -494,7 +494,7 @@ with st.sidebar:
     st.info(f"👤 Usuário: **{st.session_state.user_data['full_name']}**")
     st.info(f"🏪 Loja: **{st.session_state.user_data['store']}**")
     
-    if st.button("🚪 Sair", use_container_width=True):
+    if st.button("🚪 Sair", width='stretch'):
         st.session_state.authenticated = False
         st.session_state.user_data = None
         st.rerun()
@@ -580,6 +580,10 @@ if page == "Estoque Disponível":
                 df_display['Selecionar'] = False
                 df_display['Qtd Pedido'] = 1
                 
+                # Converter colunas numéricas para string para evitar erro de tipo
+                df_display['Referência'] = df_display['Referência'].astype(str)
+                df_display['EAN'] = df_display['EAN'].astype(str)
+                
                 # Atualizar seleções baseadas no carrinho
                 for idx, row in df_display.iterrows():
                     product_key = f"{row.get('EAN', '')}_{idx}"
@@ -590,7 +594,7 @@ if page == "Estoque Disponível":
                 # Configurar editor de dados
                 edited_df = st.data_editor(
                     df_display[['Selecionar', 'Produto', 'Referência', 'EAN', 'Setor', 'Quantidade', 'Fornecedor', 'Qtd Pedido']],
-                    use_container_width=True,
+                    width='stretch',
                     num_rows="dynamic",
                     column_config={
                         "Selecionar": st.column_config.CheckboxColumn(
@@ -778,7 +782,7 @@ if page == "Novo Pedido":
     df_pedido = st.data_editor(
         st.session_state.pedido_df,
         num_rows="dynamic",
-        use_container_width=True,
+        width='stretch',
         column_config={
             "Quantidade": st.column_config.NumberColumn(min_value=1, step=1),
             "Setor": st.column_config.SelectboxColumn(options=get_sectors(), required=True),
@@ -932,7 +936,7 @@ if page == "Meus Pedidos":
             if not df_orders.empty:
                 # Remover colunas desnecessárias (Data temporária e Responsável)
                 display_columns = [col for col in df_orders.columns if col not in ['Data', 'Responsável']]
-                st.dataframe(df_orders[display_columns], use_container_width=True)
+                st.dataframe(df_orders[display_columns], width='stretch')
                 
                 # Estatísticas
                 col1, col2, col3, col4 = st.columns(4)
@@ -1032,7 +1036,7 @@ if page == "Histórico":
             if not df_orders.empty:
                 # Remover colunas desnecessárias (Data temporária e Responsável)
                 display_columns = [col for col in df_orders.columns if col not in ['Data', 'Responsável']]
-                st.dataframe(df_orders[display_columns], use_container_width=True)
+                st.dataframe(df_orders[display_columns], width='stretch')
                 
                 # Estatísticas
                 col1, col2, col3, col4 = st.columns(4)

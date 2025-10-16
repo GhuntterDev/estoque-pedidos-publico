@@ -16,6 +16,21 @@ from sheets_config import *
 
 sys.stdout.reconfigure(line_buffering=True)
 
+# CSS para centralizar conteúdo das tabelas
+st.markdown("""
+<style>
+    .stDataFrame table {
+        text-align: center !important;
+    }
+    .stDataFrame th {
+        text-align: center !important;
+    }
+    .stDataFrame td {
+        text-align: center !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 def log(msg: str):
     print(msg, flush=True)
 
@@ -229,12 +244,12 @@ def create_order_in_sheets(store, products_data):
                 row = [
                     now.strftime("%d/%m/%Y %H:%M:%S"),  # 1: Data/hora junto
                     responsavel,                        # 2: Responsável
-                    product.get('reference', ''),       # 3: Referência
-                    product.get('ean', ''),             # 4: Código de Barras
-                    product.get('product_name', ''),    # 5: Produto
-                    product.get('quantity', 0),         # 6: Quantidade
-                    store,                              # 7: Loja
-                    product.get('sector', ''),          # 8: Setor
+                    str(product.get('reference', '')),  # 3: Referência
+                    str(product.get('ean', '')),        # 4: Código de Barras
+                    str(product.get('product_name', '')), # 5: Produto
+                    int(product.get('quantity', 0)),     # 6: Quantidade (converter para int nativo)
+                    str(store),                         # 7: Loja
+                    str(product.get('sector', '')),     # 8: Setor
                     "Pendente",                         # 9: Status
                     "",                                 # 10: Finalizado em (vazio para pendente)
                     "",                                 # 11: Responsável Saída (vazio para pendente)

@@ -753,9 +753,10 @@ if page == "Estoque Disponível":
             with col2:
                 search_term = st.text_input("Buscar Produto", placeholder="Digite nome, EAN ou referência")
                 if search_term and 'Produto' in df_stock.columns:
-                    mask = (df_stock["Produto"].str.contains(search_term, case=False, na=False) |
-                           df_stock["EAN"].str.contains(search_term, case=False, na=False) |
-                           df_stock["Referência"].str.contains(search_term, case=False, na=False))
+                    # Converter para string antes de usar .str.contains() para evitar erro com valores numéricos
+                    mask = (df_stock["Produto"].astype(str).str.contains(search_term, case=False, na=False) |
+                           df_stock["EAN"].astype(str).str.contains(search_term, case=False, na=False) |
+                           df_stock["Referência"].astype(str).str.contains(search_term, case=False, na=False))
                     df_stock = df_stock[mask]
             
             with col3:

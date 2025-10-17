@@ -17,11 +17,11 @@ from sheets_config import *
 
 sys.stdout.reconfigure(line_buffering=True)
 
-# Sistema de cache ultra-agressivo para evitar quota exceeded
-CACHE_DURATION = 7200  # 120 minutos - cache ultra-longo
+# Sistema de cache otimizado para evitar quota exceeded
+CACHE_DURATION = 1800  # 30 minutos - cache otimizado
 cache = {}
 last_api_call = 0  # Timestamp da última chamada à API
-MIN_API_INTERVAL = 15  # Mínimo 15 segundos entre chamadas à API
+MIN_API_INTERVAL = 3  # Mínimo 3 segundos entre chamadas à API
 
 def get_cached_data(key: str, fetch_func, *args, **kwargs):
     """Cache agressivo para evitar muitas chamadas à API"""
@@ -46,10 +46,10 @@ def get_cached_data(key: str, fetch_func, *args, **kwargs):
     
     if is_critical:
         # Delay adicional para operações críticas
-        time.sleep(15)
+        time.sleep(5)
     else:
         # Para carregamento inicial, delay mínimo
-        time.sleep(2)
+        time.sleep(1)
     
     try:
         last_api_call = time.time()
@@ -59,8 +59,8 @@ def get_cached_data(key: str, fetch_func, *args, **kwargs):
     except Exception as e:
         # Se for erro de quota, aguardar um pouco e tentar novamente
         if "quota" in str(e).lower() or "rate_limit" in str(e).lower():
-            log(f"⏳ Erro de quota detectado, aguardando 30 segundos...")
-            time.sleep(30)
+            log(f"⏳ Erro de quota detectado, aguardando 10 segundos...")
+            time.sleep(10)
             try:
                 data = fetch_func(*args, **kwargs)
                 cache[key] = (data, current_time)
@@ -324,8 +324,8 @@ def create_order_in_sheets(store, products_data):
             for product in products_data:
                 # Ordem correta das colunas conforme especificado:
                 # 1: Data/hora, 2: Responsável, 3: Referência, 4: Código de Barras, 
-                # 5: Produto, 6: Quantidade, 7: Loja, 8: Setor, 9: Status, 
-                # 10: Finalizado em, 11: Responsável Saída, 12: Obs
+                # 5: Produto, 6: Quantidade, 7: Qntd Enviada, 8: Loja, 9: Setor, 10: Status, 
+                # 11: Finalizado em, 12: Responsável Saída, 13: Obs
                 row = [
                     now.strftime("%d/%m/%Y %H:%M:%S"),  # 1: Data/hora junto
                     responsavel,                        # 2: Responsável
@@ -333,12 +333,13 @@ def create_order_in_sheets(store, products_data):
                     str(product.get('ean', '')),        # 4: Código de Barras
                     str(product.get('name', '') or product.get('product_name', '')), # 5: Produto
                     int(product.get('quantity', 0)),     # 6: Quantidade (converter para int nativo)
-                    str(store),                         # 7: Loja
-                    str(product.get('sector', '')),     # 8: Setor
-                    "Pendente",                         # 9: Status
-                    "",                                 # 10: Finalizado em (vazio para pendente)
-                    "",                                 # 11: Responsável Saída (vazio para pendente)
-                    str(product.get('obs', ''))         # 12: Obs
+                    0,                                  # 7: Qntd Enviada (inicialmente 0)
+                    str(store),                         # 8: Loja
+                    str(product.get('sector', '')),     # 9: Setor
+                    "Pendente",                         # 10: Status
+                    "",                                 # 11: Finalizado em (vazio para pendente)
+                    "",                                 # 12: Responsável Saída (vazio para pendente)
+                    str(product.get('obs', ''))         # 13: Obs
                 ]
                 ws.append_row(row)
             log(f"✅ Pedido criado no Google Sheets para {store} - {len(products_data)} itens")

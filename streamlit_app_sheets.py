@@ -40,8 +40,16 @@ def get_cached_data(key: str, fetch_func, *args, **kwargs):
         log(f"⏳ Aguardando {wait_time:.1f}s desde última chamada à API...")
         time.sleep(wait_time)
     
-    # Delay adicional para evitar chamadas muito frequentes
-    time.sleep(15)
+    # Delay apenas para operações críticas (não para carregamento inicial)
+    critical_operations = ["create_order", "update_cell", "sheets_client"]
+    is_critical = any(op in key for op in critical_operations)
+    
+    if is_critical:
+        # Delay adicional para operações críticas
+        time.sleep(15)
+    else:
+        # Para carregamento inicial, delay mínimo
+        time.sleep(2)
     
     try:
         last_api_call = time.time()

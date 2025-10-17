@@ -172,10 +172,15 @@ def get_sheets_client():
         else:
             log(f"ℹ️ Usando SPREADSHEET_ID padrão: {spreadsheet_id}")
         
-        # 5. Conectar ao Google Sheets
-        gc = gspread.authorize(credentials)
-        spreadsheet = gc.open_by_key(spreadsheet_id)
-        log(f"✅ Conectado ao Google Sheets: {spreadsheet.title}")
+        # 5. Conectar ao Google Sheets usando cache
+        def _connect_to_sheets():
+            gc = gspread.authorize(credentials)
+            spreadsheet = gc.open_by_key(spreadsheet_id)
+            log(f"✅ Conectado ao Google Sheets: {spreadsheet.title}")
+            return spreadsheet
+        
+        # Usar cache para evitar múltiplas conexões
+        spreadsheet = get_cached_data("sheets_client", _connect_to_sheets)
         return spreadsheet
         
     except Exception as e:

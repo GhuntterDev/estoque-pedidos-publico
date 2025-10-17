@@ -18,7 +18,7 @@ from sheets_config import *
 sys.stdout.reconfigure(line_buffering=True)
 
 # Sistema de cache simples para evitar quota exceeded
-CACHE_DURATION = 600  # 10 minutos - aumentar para reduzir chamadas à API
+CACHE_DURATION = 1800  # 30 minutos - aumentar significativamente para reduzir chamadas à API
 cache = {}
 
 def get_cached_data(key: str, fetch_func, *args, **kwargs):
@@ -30,6 +30,9 @@ def get_cached_data(key: str, fetch_func, *args, **kwargs):
         if current_time - timestamp < CACHE_DURATION:
             return data
     
+    # Delay adicional para evitar chamadas muito frequentes
+    time.sleep(2)
+    
     try:
         data = fetch_func(*args, **kwargs)
         cache[key] = (data, current_time)
@@ -37,8 +40,8 @@ def get_cached_data(key: str, fetch_func, *args, **kwargs):
     except Exception as e:
         # Se for erro de quota, aguardar um pouco e tentar novamente
         if "quota" in str(e).lower() or "rate_limit" in str(e).lower():
-            log(f"⏳ Erro de quota detectado, aguardando 30 segundos...")
-            time.sleep(30)
+            log(f"⏳ Erro de quota detectado, aguardando 60 segundos...")
+            time.sleep(60)
             try:
                 data = fetch_func(*args, **kwargs)
                 cache[key] = (data, current_time)

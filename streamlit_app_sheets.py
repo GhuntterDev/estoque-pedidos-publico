@@ -17,12 +17,15 @@ from sheets_config import *
 
 sys.stdout.reconfigure(line_buffering=True)
 
-# Sistema de cache simples para evitar quota exceeded
-CACHE_DURATION = 1800  # 30 minutos - aumentar significativamente para reduzir chamadas à API
+# Sistema de cache agressivo para evitar quota exceeded
+CACHE_DURATION = 3600  # 60 minutos - cache muito longo
 cache = {}
+last_api_call = 0  # Timestamp da última chamada à API
+MIN_API_INTERVAL = 10  # Mínimo 10 segundos entre chamadas à API
 
 def get_cached_data(key: str, fetch_func, *args, **kwargs):
-    """Cache simples para evitar muitas chamadas à API"""
+    """Cache agressivo para evitar muitas chamadas à API"""
+    global last_api_call
     current_time = time.time()
     
     if key in cache:
@@ -30,10 +33,18 @@ def get_cached_data(key: str, fetch_func, *args, **kwargs):
         if current_time - timestamp < CACHE_DURATION:
             return data
     
+    # Delay global: aguardar pelo menos 10 segundos desde a última chamada à API
+    time_since_last_call = current_time - last_api_call
+    if time_since_last_call < MIN_API_INTERVAL:
+        wait_time = MIN_API_INTERVAL - time_since_last_call
+        log(f"⏳ Aguardando {wait_time:.1f}s desde última chamada à API...")
+        time.sleep(wait_time)
+    
     # Delay adicional para evitar chamadas muito frequentes
-    time.sleep(2)
+    time.sleep(5)
     
     try:
+        last_api_call = time.time()
         data = fetch_func(*args, **kwargs)
         cache[key] = (data, current_time)
         return data

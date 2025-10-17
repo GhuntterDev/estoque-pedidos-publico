@@ -41,7 +41,7 @@ def get_cached_data(key: str, fetch_func, *args, **kwargs):
         time.sleep(wait_time)
     
     # Delay apenas para operações críticas (não para carregamento inicial)
-    critical_operations = ["create_order", "update_cell", "sheets_client"]
+    critical_operations = ["create_order", "update_cell", "sheets_client", "stock_data", "estoque"]
     is_critical = any(op in key for op in critical_operations)
     
     if is_critical:

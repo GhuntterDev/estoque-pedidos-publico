@@ -784,47 +784,88 @@ if page == "Estoque Disponível":
                 
                 with col_btn1:
                     if st.button("🛒 Atualizar Carrinho", type="primary", width='stretch'):
-                        # Limpar carrinho atual
-                        st.session_state.carrinho = {}
-                        
-                        # Adicionar itens selecionados
-                        selected_products = edited_df[edited_df['Selecionar'] == True]
-                        
-                        if not selected_products.empty:
-                            for idx, row in selected_products.iterrows():
-                                # Verificar se realmente está selecionado
-                                if not row.get('Selecionar', False):
-                                    continue
-                                    
-                                original_row = df_stock.iloc[idx]
-                                product_key = f"{original_row.get('EAN', '')}_{idx}"
+                        try:
+                            # Limpar carrinho atual
+                            st.session_state.carrinho = {}
+                            
+                            # Adicionar itens selecionados
+                            selected_products = edited_df[edited_df['Selecionar'] == True]
+                            
+                            if not selected_products.empty:
+                                # Limitar processamento para evitar problemas de performance
+                                max_items = 50  # Limite de 50 itens por vez
+                                if len(selected_products) > max_items:
+                                    st.warning(f"⚠️ Muitos produtos selecionados ({len(selected_products)}). Processando apenas os primeiros {max_items}.")
+                                    selected_products = selected_products.head(max_items)
                                 
-                                # Obter a quantidade da coluna 'Qtd Pedido' se existir
-                                qty_pedido = row.get('Qtd Pedido', 1)
-                                max_qty = original_row.get('Quantidade', 1)
+                                added_items = 0
+                                errors = []
                                 
-                                # Validar quantidade (não pode exceder estoque)
-                                if qty_pedido > max_qty:
-                                    st.error(f"❌ Quantidade {qty_pedido} excede o estoque disponível ({max_qty}) para {original_row.get('Produto', '')}")
-                                    continue
+                                for idx, row in selected_products.iterrows():
+                                    try:
+                                        # Verificar se realmente está selecionado
+                                        if not row.get('Selecionar', False):
+                                            continue
+                                            
+                                        original_row = df_stock.iloc[idx]
+                                        product_key = f"{original_row.get('EAN', '')}_{idx}"
+                                        
+                                        # Obter a quantidade da coluna 'Qtd Pedido' se existir
+                                        qty_pedido = int(row.get('Qtd Pedido', 1))
+                                        max_qty = int(original_row.get('Quantidade', 1))
+                                        
+                                        # Validar quantidade (não pode exceder estoque)
+                                        if qty_pedido > max_qty:
+                                            errors.append(f"❌ {original_row.get('Produto', '')}: Qtd {qty_pedido} > Estoque {max_qty}")
+                                            continue
+                                        
+                                        # Validar se EAN está preenchido
+                                        if not original_row.get('EAN', '').strip():
+                                            errors.append(f"❌ {original_row.get('Produto', '')}: EAN não preenchido")
+                                            continue
+                                        
+                                        st.session_state.carrinho[product_key] = {
+                                            'EAN': str(original_row.get('EAN', '')),
+                                            'Referência': str(original_row.get('Referência', '')),
+                                            'Produto': str(original_row.get('Produto', '')),
+                                            'Setor': str(original_row.get('Setor', '')),
+                                            'Quantidade': max_qty,
+                                            'Fornecedor': str(original_row.get('Fornecedor', '')),
+                                            'qty_pedido': qty_pedido
+                                        }
+                                        added_items += 1
+                                        
+                                    except Exception as e:
+                                        errors.append(f"❌ Erro ao processar {original_row.get('Produto', '')}: {str(e)}")
+                                        continue
                                 
-                                st.session_state.carrinho[product_key] = {
-                                    'EAN': original_row.get('EAN', ''),
-                                    'Referência': original_row.get('Referência', ''),
-                                    'Produto': original_row.get('Produto', ''),
-                                    'Setor': original_row.get('Setor', ''),
-                                    'Quantidade': max_qty,
-                                    'Fornecedor': original_row.get('Fornecedor', ''),
-                                    'qty_pedido': qty_pedido
-                                }
+                                # Mostrar resultados
+                                if added_items > 0:
+                                    st.success(f"🛒 {added_items} item(s) adicionado(s) ao carrinho!")
+                                
+                                if errors:
+                                    for error in errors[:5]:  # Mostrar apenas os primeiros 5 erros
+                                        st.error(error)
+                                    if len(errors) > 5:
+                                        st.warning(f"... e mais {len(errors) - 5} erros")
+                            else:
+                                st.info("ℹ️ Nenhum produto selecionado")
+                                
+                        except Exception as e:
+                            st.error(f"❌ Erro ao atualizar carrinho: {str(e)}")
                         
-                        st.success(f"🛒 {len(st.session_state.carrinho)} item(s) adicionado(s) ao carrinho!")
-                        st.rerun()
+                        # Usar st.rerun() apenas se necessário
+                        if 'carrinho' in st.session_state and st.session_state.carrinho:
+                            st.rerun()
                 
                     with col_btn2:
                         if st.button("🗑️ Limpar Seleções", type="secondary", width='stretch'):
-                            st.session_state.carrinho = {}
-                            st.rerun()
+                            try:
+                                st.session_state.carrinho = {}
+                                st.success("🗑️ Carrinho limpo com sucesso!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Erro ao limpar carrinho: {str(e)}")
             else:
                 st.info("📦 Nenhum produto disponível com os filtros aplicados.")
             

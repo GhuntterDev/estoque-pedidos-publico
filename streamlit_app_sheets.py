@@ -18,7 +18,7 @@ from sheets_config import *
 sys.stdout.reconfigure(line_buffering=True)
 
 # Sistema de cache simples para evitar quota exceeded
-CACHE_DURATION = 300  # 5 minutos
+CACHE_DURATION = 600  # 10 minutos - aumentar para reduzir chamadas à API
 cache = {}
 
 def get_cached_data(key: str, fetch_func, *args, **kwargs):
@@ -35,7 +35,24 @@ def get_cached_data(key: str, fetch_func, *args, **kwargs):
         cache[key] = (data, current_time)
         return data
     except Exception as e:
-        # Se der erro, retornar dados do cache mesmo que expirados
+        # Se for erro de quota, aguardar um pouco e tentar novamente
+        if "quota" in str(e).lower() or "rate_limit" in str(e).lower():
+            log(f"⏳ Erro de quota detectado, aguardando 30 segundos...")
+            time.sleep(30)
+            try:
+                data = fetch_func(*args, **kwargs)
+                cache[key] = (data, current_time)
+                log(f"✅ Dados obtidos após aguardar para {key}")
+                return data
+            except Exception as retry_error:
+                log(f"❌ Erro persistente após retry para {key}: {retry_error}")
+                if key in cache:
+                    data, _ = cache[key]
+                    st.warning(f"⚠️ Usando dados em cache devido a erro de quota: {str(retry_error)[:100]}")
+                    return data
+                raise retry_error
+        
+        # Se der outro tipo de erro, retornar dados do cache mesmo que expirados
         if key in cache:
             data, _ = cache[key]
             st.warning(f"⚠️ Usando dados em cache devido a erro na API: {str(e)[:100]}")
@@ -257,7 +274,8 @@ def get_current_stock_for_orders():
 def create_order_in_sheets(store, products_data):
     """Cria pedido no Google Sheets com ordem correta das colunas"""
     try:
-        ws = get_worksheet(WS_ORDERS)
+        # Usar cache para evitar múltiplas chamadas à API
+        ws = get_cached_data("worksheet_orders", get_worksheet, WS_ORDERS)
         if ws:
             now = now_br()
             # Obter dados do usuário logado
@@ -633,6 +651,9 @@ with st.sidebar:
         cache.clear()
         st.success("Cache limpo! Os dados serão recarregados.")
         st.rerun()
+    
+    # Informação sobre quota
+    st.info("💡 **Dica:** Se aparecer erro de quota, aguarde alguns minutos ou use o botão 'Limpar Cache' acima.")
     
     st.markdown("---")
     

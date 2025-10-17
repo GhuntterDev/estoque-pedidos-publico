@@ -21,7 +21,7 @@ sys.stdout.reconfigure(line_buffering=True)
 CACHE_DURATION = 7200  # 120 minutos - cache ultra-longo
 cache = {}
 last_api_call = 0  # Timestamp da última chamada à API
-MIN_API_INTERVAL = 30  # Mínimo 30 segundos entre chamadas à API
+MIN_API_INTERVAL = 5  # Mínimo 5 segundos entre chamadas à API
 
 def get_cached_data(key: str, fetch_func, *args, **kwargs):
     """Cache agressivo para evitar muitas chamadas à API"""
@@ -33,7 +33,7 @@ def get_cached_data(key: str, fetch_func, *args, **kwargs):
         if current_time - timestamp < CACHE_DURATION:
             return data
     
-    # Delay global: aguardar pelo menos 30 segundos desde a última chamada à API
+    # Delay global: aguardar pelo menos 5 segundos desde a última chamada à API
     time_since_last_call = current_time - last_api_call
     if time_since_last_call < MIN_API_INTERVAL:
         wait_time = MIN_API_INTERVAL - time_since_last_call

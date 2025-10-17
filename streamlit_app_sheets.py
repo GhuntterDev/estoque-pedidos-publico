@@ -21,7 +21,7 @@ sys.stdout.reconfigure(line_buffering=True)
 CACHE_DURATION = 7200  # 120 minutos - cache ultra-longo
 cache = {}
 last_api_call = 0  # Timestamp da última chamada à API
-MIN_API_INTERVAL = 5  # Mínimo 5 segundos entre chamadas à API
+MIN_API_INTERVAL = 8  # Mínimo 8 segundos entre chamadas à API
 
 def get_cached_data(key: str, fetch_func, *args, **kwargs):
     """Cache agressivo para evitar muitas chamadas à API"""
@@ -41,7 +41,7 @@ def get_cached_data(key: str, fetch_func, *args, **kwargs):
         time.sleep(wait_time)
     
     # Delay adicional para evitar chamadas muito frequentes
-    time.sleep(5)
+    time.sleep(8)
     
     try:
         last_api_call = time.time()
@@ -51,8 +51,8 @@ def get_cached_data(key: str, fetch_func, *args, **kwargs):
     except Exception as e:
         # Se for erro de quota, aguardar um pouco e tentar novamente
         if "quota" in str(e).lower() or "rate_limit" in str(e).lower():
-            log(f"⏳ Erro de quota detectado, aguardando 5 segundos...")
-            time.sleep(5)
+            log(f"⏳ Erro de quota detectado, aguardando 8 segundos...")
+            time.sleep(8)
             try:
                 data = fetch_func(*args, **kwargs)
                 cache[key] = (data, current_time)

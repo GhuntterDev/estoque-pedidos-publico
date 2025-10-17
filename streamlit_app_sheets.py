@@ -21,7 +21,7 @@ sys.stdout.reconfigure(line_buffering=True)
 CACHE_DURATION = 7200  # 120 minutos - cache ultra-longo
 cache = {}
 last_api_call = 0  # Timestamp da última chamada à API
-MIN_API_INTERVAL = 8  # Mínimo 8 segundos entre chamadas à API
+MIN_API_INTERVAL = 15  # Mínimo 15 segundos entre chamadas à API
 
 def get_cached_data(key: str, fetch_func, *args, **kwargs):
     """Cache agressivo para evitar muitas chamadas à API"""
@@ -41,7 +41,7 @@ def get_cached_data(key: str, fetch_func, *args, **kwargs):
         time.sleep(wait_time)
     
     # Delay adicional para evitar chamadas muito frequentes
-    time.sleep(8)
+    time.sleep(15)
     
     try:
         last_api_call = time.time()
@@ -51,8 +51,8 @@ def get_cached_data(key: str, fetch_func, *args, **kwargs):
     except Exception as e:
         # Se for erro de quota, aguardar um pouco e tentar novamente
         if "quota" in str(e).lower() or "rate_limit" in str(e).lower():
-            log(f"⏳ Erro de quota detectado, aguardando 8 segundos...")
-            time.sleep(8)
+            log(f"⏳ Erro de quota detectado, aguardando 30 segundos...")
+            time.sleep(30)
             try:
                 data = fetch_func(*args, **kwargs)
                 cache[key] = (data, current_time)
@@ -180,8 +180,20 @@ def get_sheets_client():
             return spreadsheet
         
         # Usar cache para evitar múltiplas conexões
-        spreadsheet = get_cached_data("sheets_client", _connect_to_sheets)
-        return spreadsheet
+        try:
+            spreadsheet = get_cached_data("sheets_client", _connect_to_sheets)
+            return spreadsheet
+        except Exception as cache_error:
+            log(f"⚠️ Cache falhou, tentando conexão direta: {cache_error}")
+            # Fallback: tentar conexão direta sem cache
+            try:
+                gc = gspread.authorize(credentials)
+                spreadsheet = gc.open_by_key(spreadsheet_id)
+                log(f"✅ Conexão direta bem-sucedida: {spreadsheet.title}")
+                return spreadsheet
+            except Exception as direct_error:
+                log(f"❌ Conexão direta também falhou: {direct_error}")
+                return None
         
     except Exception as e:
         log(f"❌ ERRO ao conectar com Google Sheets: {e}")

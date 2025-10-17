@@ -841,7 +841,8 @@ if page == "Estoque Disponível":
                                             continue
                                         
                                         # Validar se EAN está preenchido
-                                        if not original_row.get('EAN', '').strip():
+                                        ean_value = str(original_row.get('EAN', '')).strip()
+                                        if not ean_value:
                                             errors.append(f"❌ {original_row.get('Produto', '')}: EAN não preenchido")
                                             continue
                                         
@@ -1048,11 +1049,11 @@ if page == "Novo Pedido":
         erros = []
         
         for i, row in enumerate(linhas):
-            produto = row.get("Produto", "").strip()
-            referencia = row.get("Referência", "").strip()
-            ean = row.get("EAN", "").strip()
+            produto = str(row.get("Produto", "")).strip()
+            referencia = str(row.get("Referência", "")).strip()
+            ean = str(row.get("EAN", "")).strip()
             quantidade = row.get("Quantidade", 1)
-            setor = row.get("Setor", "").strip()
+            setor = str(row.get("Setor", "")).strip()
             obs = (row.get("Observações", "") or row.get("Obs", "") or row.get("obs", "") or "").strip()
             
             # Pular linhas vazias

@@ -17,11 +17,11 @@ from sheets_config import *
 
 sys.stdout.reconfigure(line_buffering=True)
 
-# Sistema de cache agressivo para evitar quota exceeded
-CACHE_DURATION = 3600  # 60 minutos - cache muito longo
+# Sistema de cache ultra-agressivo para evitar quota exceeded
+CACHE_DURATION = 7200  # 120 minutos - cache ultra-longo
 cache = {}
 last_api_call = 0  # Timestamp da última chamada à API
-MIN_API_INTERVAL = 10  # Mínimo 10 segundos entre chamadas à API
+MIN_API_INTERVAL = 30  # Mínimo 30 segundos entre chamadas à API
 
 def get_cached_data(key: str, fetch_func, *args, **kwargs):
     """Cache agressivo para evitar muitas chamadas à API"""
@@ -33,7 +33,7 @@ def get_cached_data(key: str, fetch_func, *args, **kwargs):
         if current_time - timestamp < CACHE_DURATION:
             return data
     
-    # Delay global: aguardar pelo menos 10 segundos desde a última chamada à API
+    # Delay global: aguardar pelo menos 30 segundos desde a última chamada à API
     time_since_last_call = current_time - last_api_call
     if time_since_last_call < MIN_API_INTERVAL:
         wait_time = MIN_API_INTERVAL - time_since_last_call
@@ -41,7 +41,7 @@ def get_cached_data(key: str, fetch_func, *args, **kwargs):
         time.sleep(wait_time)
     
     # Delay adicional para evitar chamadas muito frequentes
-    time.sleep(5)
+    time.sleep(15)
     
     try:
         last_api_call = time.time()
@@ -51,8 +51,8 @@ def get_cached_data(key: str, fetch_func, *args, **kwargs):
     except Exception as e:
         # Se for erro de quota, aguardar um pouco e tentar novamente
         if "quota" in str(e).lower() or "rate_limit" in str(e).lower():
-            log(f"⏳ Erro de quota detectado, aguardando 60 segundos...")
-            time.sleep(60)
+            log(f"⏳ Erro de quota detectado, aguardando 120 segundos...")
+            time.sleep(120)
             try:
                 data = fetch_func(*args, **kwargs)
                 cache[key] = (data, current_time)

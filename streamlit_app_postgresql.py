@@ -285,7 +285,7 @@ if not st.session_state.authenticated:
         st.markdown("### ℹ️ **Informações**")
         st.markdown("*Sistema de Pedidos usando PostgreSQL no Render.*")
         st.markdown("*Administradores podem acessar tanto gestão quanto pedidos.*")
-        st.markdown("**Senha Administrativa:** `18111997`")
+        st.markdown("*Para criar contas, é necessária a senha administrativa.*")
     
     st.stop()
 

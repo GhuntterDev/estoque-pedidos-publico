@@ -1,6 +1,7 @@
 # estoque_pedidos_postgresql.py — Sistema de Pedidos com PostgreSQL
 # Interface para funcionários das lojas fazerem pedidos usando PostgreSQL
 # Funcionalidades: Ver Estoque, Fazer Pedidos, Acompanhar Status, Histórico
+# Atualizado: Correção do usuário Ghuntter para funcionar como admin
 
 import os, sys
 import json

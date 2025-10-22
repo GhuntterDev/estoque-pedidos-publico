@@ -159,20 +159,7 @@ def get_orders_by_store(store):
 # ============================================================================
 # SISTEMA DE AUTENTICAÇÃO
 # ============================================================================
-
-def authenticate_user(login, password):
-    """Sistema de autenticação com PostgreSQL"""
-    try:
-        success, user_data = authenticate_user(login, password)
-        if success:
-            log(f"✅ Usuário autenticado: {user_data['username']}")
-            return True, user_data
-        else:
-            log(f"❌ Falha na autenticação: {login}")
-            return False, {}
-    except Exception as e:
-        log(f"❌ ERRO na autenticação: {e}")
-        return False, {}
+# authenticate_user já está importado de database_config_render
 
 # ============================================================================
 # INTERFACE PRINCIPAL

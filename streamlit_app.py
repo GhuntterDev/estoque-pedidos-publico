@@ -1,6 +1,7 @@
-# estoque_pedidos_sheets.py — Sistema de Pedidos com Google Sheets
-# Interface para funcionários das lojas fazerem pedidos usando Google Sheets
+# estoque_pedidos_postgresql.py — Sistema de Pedidos com PostgreSQL
+# Interface para funcionários das lojas fazerem pedidos usando PostgreSQL
 # Funcionalidades: Ver Estoque, Fazer Pedidos, Acompanhar Status, Histórico
+# Atualizado: Correção do usuário Ghuntter para funcionar como admin
 
 import os, sys
 import json
@@ -9,16 +10,26 @@ import datetime as dt
 from typing import List, Tuple, Optional, Dict
 import streamlit as st
 import pandas as pd
-import gspread
-from google.oauth2.service_account import Credentials
 
-# Configurações do Google Sheets
-from sheets_config import *
+# Configurações do PostgreSQL
+from database_config_render import (
+    init_database, test_connection, get_connection,
+    get_current_stock_for_orders, get_products_by_sector, create_product,
+    create_order, get_orders_by_store, get_all_orders,
+    authenticate_user, create_user, db_units, db_sectors
+)
 
 sys.stdout.reconfigure(line_buffering=True)
 
 def log(msg: str):
     print(msg, flush=True)
+
+def verify_admin_password(password: str) -> bool:
+    """Verifica se a senha administrativa está correta"""
+    import hashlib
+    # Hash da senha administrativa: 18111997
+    admin_hash = "8cf5ba63732841bca65f44882633f61d426eff5deccc783b286c9b3373f1cee0"
+    return hashlib.sha256(password.encode()).hexdigest() == admin_hash
 
 # Configurações da empresa
 STORE_CNPJ = {
@@ -38,154 +49,117 @@ def now_br() -> dt.datetime:
     return dt.datetime.now(tz=BR_TZ)
 
 # ============================================================================
-# FUNÇÕES DO GOOGLE SHEETS
+# FUNÇÕES DO POSTGRESQL
 # ============================================================================
 
-def get_sheets_client():
-    """Obtém cliente do Google Sheets usando apenas Streamlit Secrets"""
-    try:
-        # Usar apenas credenciais do Streamlit secrets
-        if 'gcp_service_account' in st.secrets:
-            credentials_info = st.secrets['gcp_service_account']
-            credentials = Credentials.from_service_account_info(
-                credentials_info,
-                scopes=['https://www.googleapis.com/auth/spreadsheets']
-            )
-            log("✅ Credenciais carregadas de Streamlit secrets")
-            return gspread.authorize(credentials)
-        else:
-            log("❌ Credenciais 'gcp_service_account' não encontradas em st.secrets")
-            return None
-        
-    except Exception as e:
-        log(f"❌ ERRO ao conectar com Google Sheets: {e}")
-        return None
-
-def get_worksheet(worksheet_name):
-    """Obtém uma planilha específica"""
-    try:
-        client = get_sheets_client()
-        if not client:
-            return None
-        
-        spreadsheet = client.open_by_key(SPREADSHEET_ID)
-        worksheet = spreadsheet.worksheet(worksheet_name)
-        return worksheet
-        
-    except Exception as e:
-        log(f"❌ ERRO ao obter planilha '{worksheet_name}': {e}")
-        return None
-
 def get_current_stock_for_orders():
-    """Obtém estoque atual diretamente da aba 'Saldo' do Google Sheets"""
+    """Obtém estoque atual do PostgreSQL"""
     try:
-        # Obter dados diretamente da aba 'Saldo'
-        ws_saldos = get_worksheet("Saldo")
-        if not ws_saldos:
-            log("❌ Aba 'Saldo' não encontrada")
-            return []
-        
-        records = ws_saldos.get_all_records()
-        log(f"✅ {len(records)} registros encontrados na aba 'Saldo'")
+        stock_data = get_current_stock_for_orders()
+        log(f"✅ {len(stock_data)} produtos carregados do PostgreSQL")
         
         stock_list = []
-        for record in records:
-            # Extrair dados da aba Saldo
-            fornecedor = record.get('Fornecedor') or record.get('fornecedor') or ''
-            referencia = record.get('Referencia') or record.get('Referência') or record.get('referencia') or ''
-            ean = record.get('Código de Barras') or record.get('codigo_de_barras') or record.get('ean') or ''
-            nome = record.get('Nome') or record.get('nome') or record.get('produto') or ''
-            setor = record.get('Setor') or record.get('setor') or ''
-            quantidade = record.get('Quantidade') or record.get('quantidade') or record.get('estoque') or 0
+        for row in stock_data:
+            product_id, ean, reference, name, sector_name, total_quantity, last_updated = row
             
-            # Converter quantidade para inteiro
-            try:
-                quantidade = int(float(quantidade)) if quantidade else 0
-            except (ValueError, TypeError):
-                quantidade = 0
-            
-            if referencia and nome:  # Só incluir se tiver dados básicos
-                stock_item = {
-                    'ID': len(stock_list),
-                    'EAN': ean,
-                    'Referência': referencia,
-                    'Produto': nome,
-                    'Setor': setor,
-                    'Quantidade': quantidade,
-                    'Fornecedor': fornecedor,
-                    'Última Atualização': now_br().strftime("%d/%m/%Y %H:%M")
-                }
-                stock_list.append(stock_item)
+            stock_item = {
+                'ID': product_id,
+                'EAN': ean or '',
+                'Referência': reference or '',
+                'Produto': name,
+                'Setor': sector_name,
+                'Quantidade': total_quantity,
+                'Fornecedor': 'CD',  # Assumir que vem do CD
+                'Última Atualização': now_br().strftime("%d/%m/%Y %H:%M")
+            }
+            stock_list.append(stock_item)
         
-        log(f"✅ Estoque carregado da aba 'Saldo': {len(stock_list)} produtos")
         return stock_list
         
     except Exception as e:
-        log(f"❌ ERRO ao carregar estoque da aba 'Saldo': {e}")
-        import traceback
-        log(f"   Traceback: {traceback.format_exc()}")
+        log(f"❌ ERRO ao carregar estoque do PostgreSQL: {e}")
         return []
 
-def create_order_in_sheets(store, products_data):
-    """Cria um pedido no Google Sheets"""
+def create_order_in_postgresql(store, products_data):
+    """Cria um pedido no PostgreSQL"""
     try:
-        ws_pedidos = get_worksheet(WS_ORDERS)
-        if not ws_pedidos:
-            log("❌ Planilha de pedidos não encontrada")
-            return False
+        order_ids = []
         
-        # Preparar dados do pedido
-        order_data = {
-            'Data': now_br().strftime("%d/%m/%Y"),
-            'Hora': now_br().strftime("%H:%M"),
-            'Loja': store,
-            'Status': 'Pendente',
-            'Produtos': json.dumps(products_data, ensure_ascii=False),
-            'Total_Itens': sum(item['quantidade'] for item in products_data),
-            'Observacoes': ''
-        }
+        for product in products_data:
+            # Buscar produto no banco
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT id FROM products 
+                        WHERE reference = %s OR ean = %s
+                    """, (product['referencia'], product['referencia']))
+                    product_row = cur.fetchone()
+                    
+                    if product_row:
+                        product_id = product_row[0]
+                    else:
+                        # Criar produto se não existir
+                        product_id = create_product(
+                            ean=product.get('ean', ''),
+                            reference=product['referencia'],
+                            name=product['produto'],
+                            sector=product['setor']
+                        )
+            
+            # Criar pedido
+            order_id = create_order(
+                store=store,
+                product_id=product_id,
+                quantity=product['quantidade'],
+                requested_by=store,  # Assumir que a loja está fazendo o pedido
+                notes=f"Pedido automático - {len(products_data)} produtos"
+            )
+            order_ids.append(order_id)
         
-        # Adicionar linha na planilha
-        ws_pedidos.append_row(list(order_data.values()))
-        log(f"✅ Pedido criado para {store} com {len(products_data)} produtos")
+        log(f"✅ Pedido criado no PostgreSQL: {len(order_ids)} itens")
         return True
         
     except Exception as e:
-        log(f"❌ ERRO ao criar pedido: {e}")
+        log(f"❌ ERRO ao criar pedido no PostgreSQL: {e}")
         return False
 
 def get_orders_by_store(store):
-    """Obtém pedidos de uma loja específica"""
+    """Obtém pedidos de uma loja específica do PostgreSQL"""
     try:
-        ws_pedidos = get_worksheet(WS_ORDERS)
-        if not ws_pedidos:
-            return []
+        orders_data = get_orders_by_store(store)
+        log(f"✅ {len(orders_data)} pedidos carregados para {store}")
         
-        records = ws_pedidos.get_all_records()
-        store_orders = [record for record in records if record.get('Loja') == store]
-        return store_orders
+        orders_list = []
+        for row in orders_data:
+            order_id, store_name, ean, reference, product_name, requested_qty, delivered_qty, pending_qty, requested_by, status, created_at, updated_at, notes = row
+            
+            order_item = {
+                'ID': order_id,
+                'Data': created_at.strftime("%d/%m/%Y") if created_at else '',
+                'Hora': created_at.strftime("%H:%M") if created_at else '',
+                'Loja': store_name,
+                'Produto': product_name,
+                'Referência': reference,
+                'EAN': ean or '',
+                'Quantidade Solicitada': requested_qty,
+                'Quantidade Entregue': delivered_qty,
+                'Quantidade Pendente': pending_qty,
+                'Status': status,
+                'Solicitado por': requested_by,
+                'Observações': notes or ''
+            }
+            orders_list.append(order_item)
+        
+        return orders_list
         
     except Exception as e:
         log(f"❌ ERRO ao carregar pedidos da loja {store}: {e}")
         return []
 
 # ============================================================================
-# SISTEMA DE AUTENTICAÇÃO SIMPLES
+# SISTEMA DE AUTENTICAÇÃO
 # ============================================================================
-
-def authenticate_user(login, password):
-    """Sistema de autenticação simples para demonstração"""
-    users = {
-        "loja": {"password": "loja123", "full_name": "Funcionário Loja", "role": "store", "store": "MDC - Carioca"},
-        "admin": {"password": "admin123", "full_name": "Administrador", "role": "admin", "store": "CD"}
-    }
-    
-    if login in users and users[login]["password"] == password:
-        user_data = users[login].copy()
-        user_data["username"] = login
-        return True, user_data
-    
-    return False, {}
+# authenticate_user já está importado de database_config_render
 
 # ============================================================================
 # INTERFACE PRINCIPAL
@@ -205,47 +179,131 @@ if not st.session_state.authenticated:
     
     with col2:
         st.title("🛒 Melhor das Casas")
-        st.subheader("Sistema de Pedidos (Carrinho de Compras)")
+        st.subheader("Sistema de Pedidos (PostgreSQL)")
         
-        with st.form("login_form"):
-            login = st.text_input("Usuário", placeholder="Digite seu login", value="loja")
-            password = st.text_input("Senha", type="password", placeholder="Digite sua senha")
-            submit = st.form_submit_button("Entrar", use_container_width=True)
-            
-            if submit:
-                if not login or not password:
-                    st.error("Por favor, preencha todos os campos.")
-                else:
-                    success, user_data = authenticate_user(login, password)
-                    
-                    if success and user_data['role'] == 'store':
-                        st.session_state.authenticated = True
-                        st.session_state.user_data = user_data
-                        st.success("Login realizado com sucesso!")
-                        st.rerun()
-                    elif success:
-                        st.error("Acesso negado. Este sistema é específico para funcionários das lojas.")
+        # Inicializar banco de dados
+        try:
+            init_database()
+            st.success("✅ Banco de dados conectado!")
+        except Exception as e:
+            st.error(f"❌ Erro ao conectar com banco: {e}")
+            st.stop()
+        
+        # Tabs para Login e Criar Conta
+        tab1, tab2 = st.tabs(["🔐 Login", "👤 Criar Conta"])
+        
+        with tab1:
+            with st.form("login_form"):
+                login = st.text_input("Usuário", placeholder="Digite seu login")
+                password = st.text_input("Senha", type="password", placeholder="Digite sua senha")
+                submit = st.form_submit_button("Entrar", use_container_width=True)
+                
+                if submit:
+                    if not login or not password:
+                        st.error("Por favor, preencha todos os campos.")
                     else:
-                        st.error("Usuário ou senha incorretos.")
+                        success, user_data = authenticate_user(login, password)
+                        
+                        if success:
+                            st.session_state.authenticated = True
+                            st.session_state.user_data = user_data
+                            st.success("Login realizado com sucesso!")
+                            st.rerun()
+                        else:
+                            st.error("Usuário ou senha incorretos.")
+        
+        with tab2:
+            with st.form("create_account_form"):
+                st.markdown("### 👤 Criar Nova Conta")
+                st.markdown("*Apenas administradores podem criar novas contas.*")
+                
+                # Senha administrativa
+                admin_password = st.text_input("Senha Administrativa", type="password", 
+                                             placeholder="Digite a senha administrativa", 
+                                             help="Senha necessária para criar contas")
+                
+                new_username = st.text_input("Nome de usuário", placeholder="Digite o nome de usuário")
+                new_password = st.text_input("Senha", type="password", placeholder="Digite a senha")
+                new_full_name = st.text_input("Nome completo", placeholder="Digite o nome completo")
+                
+                # Opção para escolher se é admin
+                is_admin = st.checkbox("É administrador?", help="Administradores podem acessar tanto gestão quanto pedidos")
+                
+                # Se não for admin, escolher loja
+                if not is_admin:
+                    store_options = ["MDC - Carioca", "MDC - Santa Cruz", "MDC - Madureira", 
+                                   "MDC - Bonsucesso", "MDC - Nilópolis", "MDC - Mesquita"]
+                    selected_store = st.selectbox("Loja", store_options)
+                else:
+                    selected_store = "CD"  # Admin fica no CD
+                
+                create_submit = st.form_submit_button("Criar Conta", use_container_width=True)
+                
+                if create_submit:
+                    if not all([admin_password, new_username, new_password, new_full_name]):
+                        st.error("Por favor, preencha todos os campos.")
+                    else:
+                        # Verificar senha administrativa
+                        if not verify_admin_password(admin_password):
+                            st.error("❌ Senha administrativa incorreta.")
+                        else:
+                            try:
+                                # Determinar role
+                                role = "admin" if is_admin else "store"
+                                
+                                # Criar usuário
+                                user_id = create_user(
+                                    username=new_username,
+                                    password=new_password,
+                                    full_name=new_full_name,
+                                    role=role,
+                                    store=selected_store
+                                )
+                                
+                                if user_id:
+                                    st.success(f"✅ Conta criada com sucesso! ID: {user_id}")
+                                    st.info("Agora você pode fazer login com suas credenciais.")
+                                else:
+                                    st.error("Erro ao criar conta. Usuário pode já existir.")
+                                    
+                            except Exception as e:
+                                st.error(f"Erro ao criar conta: {e}")
         
         st.markdown("---")
-        st.markdown("### 👥 **Usuários Disponíveis**")
-        st.markdown("**Para lojas:**")
-        st.markdown("- loja / loja123 (Loja)")
-        st.markdown("*Nota: Este sistema é específico para funcionários das lojas.*")
+        st.markdown("### ℹ️ **Informações**")
+        st.markdown("*Sistema de Pedidos usando PostgreSQL no Render.*")
+        st.markdown("*Administradores podem acessar tanto gestão quanto pedidos.*")
+        st.markdown("*Para criar contas, é necessária a senha administrativa.*")
     
     st.stop()
 
 st.set_page_config(page_title="MDC — Pedidos", page_icon="🛒", layout="wide")
 
 if "sectors" not in st.session_state:
-    st.session_state.sectors = ["Geral", "Brinquedos", "Papelaria", "Decoração"]
+    try:
+        st.session_state.sectors = db_sectors()
+    except Exception as e:
+        st.session_state.sectors = ["Geral", "Brinquedos", "Papelaria", "Decoração"]
 
 with st.sidebar:
     st.title("MDC — Pedidos")
     
-    st.info(f"👤 Usuário: **{st.session_state.user_data['full_name']}**")
-    st.info(f"🏪 Loja: **{st.session_state.user_data['store']}**")
+    user_data = st.session_state.user_data
+    st.info(f"👤 Usuário: **{user_data['full_name']}**")
+    
+    # Mostrar informações diferentes para admin
+    if user_data['role'] == 'admin':
+        st.info(f"🔑 **Administrador**")
+        st.info(f"🏢 **Acesso Total**")
+        
+        # Links para outros sistemas
+        st.markdown("### 🔗 **Acessos Rápidos**")
+        if st.button("📊 Sistema de Gestão", use_container_width=True):
+            st.info("Acesse: https://share.streamlit.io/SEU_USUARIO/estoque.mdc")
+        if st.button("🛒 Sistema de Pedidos", use_container_width=True):
+            st.info("Você já está aqui!")
+    else:
+        st.info(f"🏪 Loja: **{user_data['store']}**")
     
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.authenticated = False
@@ -256,14 +314,20 @@ with st.sidebar:
 # PÁGINA PRINCIPAL
 # ============================================================================
 
-st.title("🛒 Sistema de Pedidos")
-st.markdown(f"**Bem-vindo, {st.session_state.user_data['full_name']}!**")
+st.title("🛒 Sistema de Pedidos (PostgreSQL)")
+
+user_data = st.session_state.user_data
+if user_data['role'] == 'admin':
+    st.markdown(f"**Bem-vindo, {user_data['full_name']}! (Administrador)**")
+    st.info("🔑 Como administrador, você tem acesso total ao sistema e pode acessar tanto gestão quanto pedidos.")
+else:
+    st.markdown(f"**Bem-vindo, {user_data['full_name']}!**")
 
 # Dashboard
 st.header("📊 Dashboard")
 
 try:
-    # Carregar dados do Google Sheets
+    # Carregar dados do PostgreSQL
     stock = get_current_stock_for_orders()
     orders = get_orders_by_store(st.session_state.user_data['store'])
     
@@ -286,7 +350,7 @@ try:
     
 except Exception as e:
     st.error(f"Erro ao carregar dados: {str(e)}")
-    st.info("Verifique a conexão com o Google Sheets")
+    st.info("Verifique a conexão com o PostgreSQL")
 
 # Seções do sistema
 st.markdown("---")
@@ -406,7 +470,7 @@ with tab1:
                         
                         if st.button("📤 Enviar Pedido", use_container_width=True, type="primary"):
                             if st.session_state.carrinho:
-                                success = create_order_in_sheets(st.session_state.user_data['store'], st.session_state.carrinho)
+                                success = create_order_in_postgresql(st.session_state.user_data['store'], st.session_state.carrinho)
                                 if success:
                                     st.success("✅ Pedido enviado com sucesso!")
                                     st.session_state.carrinho = []
@@ -452,7 +516,7 @@ with tab1:
     
     except Exception as e:
         st.error(f"Erro ao carregar estoque: {str(e)}")
-        st.info("Verifique a conexão com o Google Sheets")
+        st.info("Verifique a conexão com o PostgreSQL")
 
 with tab2:
     st.header("📋 Meus Pedidos")
@@ -486,14 +550,14 @@ with tab2:
                 st.metric("Atendidos", completed_orders)
             
             with col4:
-                total_items = sum([o.get('Total_Itens', 0) for o in orders])
+                total_items = sum([o.get('Quantidade Solicitada', 0) for o in orders])
                 st.metric("Total de Itens", total_items)
         else:
             st.info("Nenhum pedido encontrado para sua loja.")
     
     except Exception as e:
         st.error(f"Erro ao carregar pedidos: {str(e)}")
-        st.info("Verifique a conexão com o Google Sheets")
+        st.info("Verifique a conexão com o PostgreSQL")
 
 with tab3:
     st.header("📦 Estoque Disponível")
@@ -532,18 +596,28 @@ with tab3:
     
     except Exception as e:
         st.error(f"Erro ao carregar estoque: {str(e)}")
-        st.info("Verifique a conexão com o Google Sheets")
+        st.info("Verifique a conexão com o PostgreSQL")
 
 with tab4:
     st.header("⚙️ Configurações")
     
     st.markdown("### **🔧 Status do Sistema**")
     st.success("✅ Sistema completo ativo")
-    st.info("Google Sheets configurado")
-    st.info("🔗 Conexão com Google Sheets ativa")
+    st.info("PostgreSQL configurado no Render")
+    st.info("🔗 Conexão com PostgreSQL ativa")
     
     st.markdown("### **👤 Informações do Usuário**")
     st.info(f"**Usuário:** {st.session_state.user_data['username']}")
     st.info(f"**Nome:** {st.session_state.user_data['full_name']}")
     st.info(f"**Função:** {st.session_state.user_data['role']}")
     st.info(f"**Loja:** {st.session_state.user_data['store']}")
+    
+    # Teste de conexão
+    if st.button("🔍 Testar Conexão com PostgreSQL"):
+        try:
+            if test_connection():
+                st.success("✅ Conexão com PostgreSQL funcionando!")
+            else:
+                st.error("❌ Erro na conexão com PostgreSQL")
+        except Exception as e:
+            st.error(f"❌ Erro: {e}")

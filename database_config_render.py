@@ -36,7 +36,8 @@ def get_db_config():
         'port': 5432,
         'database': 'estoqueapp_7p6x',
         'user': 'estoqueapp_7p6x_user',
-        'password': 'Bhd10ADnSHGEsdJ1A4kWVkBPryLg3Fqx'
+        'password': 'Bhd10ADnSHGEsdJ1A4kWVkBPryLg3Fqx',
+        'sslmode': 'require'
     }
 
 # Configurações da base de dados

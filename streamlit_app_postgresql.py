@@ -23,6 +23,13 @@ sys.stdout.reconfigure(line_buffering=True)
 def log(msg: str):
     print(msg, flush=True)
 
+def verify_admin_password(password: str) -> bool:
+    """Verifica se a senha administrativa está correta"""
+    import hashlib
+    # Hash da senha administrativa: 18111997
+    admin_hash = "8cf5ba63732841bca65f44882633f61d426eff5deccc783b286c9b3373f1cee0"
+    return hashlib.sha256(password.encode()).hexdigest() == admin_hash
+
 # Configurações da empresa
 STORE_CNPJ = {
     "MDC - Carioca": "57.635.793/0001-32",
@@ -220,6 +227,12 @@ if not st.session_state.authenticated:
         with tab2:
             with st.form("create_account_form"):
                 st.markdown("### 👤 Criar Nova Conta")
+                st.markdown("*Apenas administradores podem criar novas contas.*")
+                
+                # Senha administrativa
+                admin_password = st.text_input("Senha Administrativa", type="password", 
+                                             placeholder="Digite a senha administrativa", 
+                                             help="Senha necessária para criar contas")
                 
                 new_username = st.text_input("Nome de usuário", placeholder="Digite o nome de usuário")
                 new_password = st.text_input("Senha", type="password", placeholder="Digite a senha")
@@ -239,35 +252,40 @@ if not st.session_state.authenticated:
                 create_submit = st.form_submit_button("Criar Conta", use_container_width=True)
                 
                 if create_submit:
-                    if not all([new_username, new_password, new_full_name]):
+                    if not all([admin_password, new_username, new_password, new_full_name]):
                         st.error("Por favor, preencha todos os campos.")
                     else:
-                        try:
-                            # Determinar role
-                            role = "admin" if is_admin else "store"
-                            
-                            # Criar usuário
-                            user_id = create_user(
-                                username=new_username,
-                                password=new_password,
-                                full_name=new_full_name,
-                                role=role,
-                                store=selected_store
-                            )
-                            
-                            if user_id:
-                                st.success(f"✅ Conta criada com sucesso! ID: {user_id}")
-                                st.info("Agora você pode fazer login com suas credenciais.")
-                            else:
-                                st.error("Erro ao criar conta. Usuário pode já existir.")
+                        # Verificar senha administrativa
+                        if not verify_admin_password(admin_password):
+                            st.error("❌ Senha administrativa incorreta.")
+                        else:
+                            try:
+                                # Determinar role
+                                role = "admin" if is_admin else "store"
                                 
-                        except Exception as e:
-                            st.error(f"Erro ao criar conta: {e}")
+                                # Criar usuário
+                                user_id = create_user(
+                                    username=new_username,
+                                    password=new_password,
+                                    full_name=new_full_name,
+                                    role=role,
+                                    store=selected_store
+                                )
+                                
+                                if user_id:
+                                    st.success(f"✅ Conta criada com sucesso! ID: {user_id}")
+                                    st.info("Agora você pode fazer login com suas credenciais.")
+                                else:
+                                    st.error("Erro ao criar conta. Usuário pode já existir.")
+                                    
+                            except Exception as e:
+                                st.error(f"Erro ao criar conta: {e}")
         
         st.markdown("---")
         st.markdown("### ℹ️ **Informações**")
         st.markdown("*Sistema de Pedidos usando PostgreSQL no Render.*")
         st.markdown("*Administradores podem acessar tanto gestão quanto pedidos.*")
+        st.markdown("**Senha Administrativa:** `18111997`")
     
     st.stop()
 

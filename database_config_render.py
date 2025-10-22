@@ -197,46 +197,68 @@ def get_connection():
             conn.close()
 
 def init_database():
-    """Inicializa a base de dados PostgreSQL"""
-    try:
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                # Executar DDL
-                cur.execute(POSTGRES_DDL_PEDIDOS)
-                
-                # Inserir dados iniciais
-                for unit in UNITS_SEED:
-                    cur.execute(
-                        "INSERT INTO units (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
-                        (unit,)
-                    )
-                
-                for sector in SECTORS_SEED:
-                    cur.execute(
-                        "INSERT INTO sectors (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
-                        (sector,)
-                    )
-                
-                # Criar usuário admin padrão
-                cur.execute("""
-                    INSERT INTO users (username, password_hash, full_name, role, store)
-                    VALUES ('admin', '8cf5ba63732841bca65f44882633f61d426eff5deccc783b286c9b3373f1cee0', 'Administrador', 'admin', 'CD')
-                    ON CONFLICT (username) DO NOTHING
-                """)
-                
-                # Criar usuário de loja padrão
-                cur.execute("""
-                    INSERT INTO users (username, password_hash, full_name, role, store)
-                    VALUES ('loja', 'ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f', 'Funcionário Loja', 'store', 'MDC - Carioca')
-                    ON CONFLICT (username) DO NOTHING
-                """)
-                
-                conn.commit()
-                logging.info("Base de dados PostgreSQL inicializada com sucesso")
-                
-    except Exception as e:
-        logging.error(f"Erro ao inicializar base de dados: {e}")
-        raise
+    """Inicializa a base de dados PostgreSQL com retry logic para evitar deadlocks"""
+    import time
+    import random
+    
+    max_retries = 5
+    base_delay = 1
+    
+    for attempt in range(max_retries):
+        try:
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Executar DDL
+                    cur.execute(POSTGRES_DDL_PEDIDOS)
+                    
+                    # Inserir dados iniciais
+                    for unit in UNITS_SEED:
+                        cur.execute(
+                            "INSERT INTO units (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
+                            (unit,)
+                        )
+                    
+                    for sector in SECTORS_SEED:
+                        cur.execute(
+                            "INSERT INTO sectors (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
+                            (sector,)
+                        )
+                    
+                    # Criar usuário admin padrão
+                    cur.execute("""
+                        INSERT INTO users (username, password_hash, full_name, role, store)
+                        VALUES ('admin', '8cf5ba63732841bca65f44882633f61d426eff5deccc783b286c9b3373f1cee0', 'Administrador', 'admin', 'CD')
+                        ON CONFLICT (username) DO NOTHING
+                    """)
+                    
+                    # Criar usuário de loja padrão
+                    cur.execute("""
+                        INSERT INTO users (username, password_hash, full_name, role, store)
+                        VALUES ('loja', 'ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f', 'Funcionário Loja', 'store', 'MDC - Carioca')
+                        ON CONFLICT (username) DO NOTHING
+                    """)
+                    
+                    conn.commit()
+                    logging.info("Base de dados PostgreSQL inicializada com sucesso")
+                    return True
+                    
+        except Exception as e:
+            if "deadlock detected" in str(e).lower():
+                if attempt < max_retries - 1:
+                    # Exponential backoff com jitter
+                    delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                    print(f"⚠️ Deadlock detectado, tentando novamente em {delay:.1f}s (tentativa {attempt + 1}/{max_retries})")
+                    time.sleep(delay)
+                    continue
+                else:
+                    print(f"❌ Máximo de tentativas atingido após deadlock")
+                    logging.error(f"Erro ao inicializar base de dados após {max_retries} tentativas: {e}")
+                    return False
+            else:
+                logging.error(f"Erro ao inicializar base de dados: {e}")
+                return False
+    
+    return False
 
 def test_connection():
     """Testa a conexão com PostgreSQL"""

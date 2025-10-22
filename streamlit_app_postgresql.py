@@ -194,32 +194,80 @@ if not st.session_state.authenticated:
             st.error(f"❌ Erro ao conectar com banco: {e}")
             st.stop()
         
-        with st.form("login_form"):
-            login = st.text_input("Usuário", placeholder="Digite seu login", value="loja")
-            password = st.text_input("Senha", type="password", placeholder="Digite sua senha", value="loja123")
-            submit = st.form_submit_button("Entrar", use_container_width=True)
-            
-            if submit:
-                if not login or not password:
-                    st.error("Por favor, preencha todos os campos.")
-                else:
-                    success, user_data = authenticate_user(login, password)
-                    
-                    if success and user_data['role'] == 'store':
-                        st.session_state.authenticated = True
-                        st.session_state.user_data = user_data
-                        st.success("Login realizado com sucesso!")
-                        st.rerun()
-                    elif success:
-                        st.error("Acesso negado. Este sistema é específico para funcionários das lojas.")
+        # Tabs para Login e Criar Conta
+        tab1, tab2 = st.tabs(["🔐 Login", "👤 Criar Conta"])
+        
+        with tab1:
+            with st.form("login_form"):
+                login = st.text_input("Usuário", placeholder="Digite seu login")
+                password = st.text_input("Senha", type="password", placeholder="Digite sua senha")
+                submit = st.form_submit_button("Entrar", use_container_width=True)
+                
+                if submit:
+                    if not login or not password:
+                        st.error("Por favor, preencha todos os campos.")
                     else:
-                        st.error("Usuário ou senha incorretos.")
+                        success, user_data = authenticate_user(login, password)
+                        
+                        if success:
+                            st.session_state.authenticated = True
+                            st.session_state.user_data = user_data
+                            st.success("Login realizado com sucesso!")
+                            st.rerun()
+                        else:
+                            st.error("Usuário ou senha incorretos.")
+        
+        with tab2:
+            with st.form("create_account_form"):
+                st.markdown("### 👤 Criar Nova Conta")
+                
+                new_username = st.text_input("Nome de usuário", placeholder="Digite o nome de usuário")
+                new_password = st.text_input("Senha", type="password", placeholder="Digite a senha")
+                new_full_name = st.text_input("Nome completo", placeholder="Digite o nome completo")
+                
+                # Opção para escolher se é admin
+                is_admin = st.checkbox("É administrador?", help="Administradores podem acessar tanto gestão quanto pedidos")
+                
+                # Se não for admin, escolher loja
+                if not is_admin:
+                    store_options = ["MDC - Carioca", "MDC - Santa Cruz", "MDC - Madureira", 
+                                   "MDC - Bonsucesso", "MDC - Nilópolis", "MDC - Mesquita"]
+                    selected_store = st.selectbox("Loja", store_options)
+                else:
+                    selected_store = "CD"  # Admin fica no CD
+                
+                create_submit = st.form_submit_button("Criar Conta", use_container_width=True)
+                
+                if create_submit:
+                    if not all([new_username, new_password, new_full_name]):
+                        st.error("Por favor, preencha todos os campos.")
+                    else:
+                        try:
+                            # Determinar role
+                            role = "admin" if is_admin else "store"
+                            
+                            # Criar usuário
+                            user_id = create_user(
+                                username=new_username,
+                                password=new_password,
+                                full_name=new_full_name,
+                                role=role,
+                                store=selected_store
+                            )
+                            
+                            if user_id:
+                                st.success(f"✅ Conta criada com sucesso! ID: {user_id}")
+                                st.info("Agora você pode fazer login com suas credenciais.")
+                            else:
+                                st.error("Erro ao criar conta. Usuário pode já existir.")
+                                
+                        except Exception as e:
+                            st.error(f"Erro ao criar conta: {e}")
         
         st.markdown("---")
-        st.markdown("### 👥 **Usuários Disponíveis**")
-        st.markdown("**Para lojas:**")
-        st.markdown("- loja / loja123 (Loja)")
-        st.markdown("*Nota: Este sistema usa PostgreSQL no Render.*")
+        st.markdown("### ℹ️ **Informações**")
+        st.markdown("*Sistema de Pedidos usando PostgreSQL no Render.*")
+        st.markdown("*Administradores podem acessar tanto gestão quanto pedidos.*")
     
     st.stop()
 
@@ -234,8 +282,22 @@ if "sectors" not in st.session_state:
 with st.sidebar:
     st.title("MDC — Pedidos")
     
-    st.info(f"👤 Usuário: **{st.session_state.user_data['full_name']}**")
-    st.info(f"🏪 Loja: **{st.session_state.user_data['store']}**")
+    user_data = st.session_state.user_data
+    st.info(f"👤 Usuário: **{user_data['full_name']}**")
+    
+    # Mostrar informações diferentes para admin
+    if user_data['role'] == 'admin':
+        st.info(f"🔑 **Administrador**")
+        st.info(f"🏢 **Acesso Total**")
+        
+        # Links para outros sistemas
+        st.markdown("### 🔗 **Acessos Rápidos**")
+        if st.button("📊 Sistema de Gestão", use_container_width=True):
+            st.info("Acesse: https://share.streamlit.io/SEU_USUARIO/estoque.mdc")
+        if st.button("🛒 Sistema de Pedidos", use_container_width=True):
+            st.info("Você já está aqui!")
+    else:
+        st.info(f"🏪 Loja: **{user_data['store']}**")
     
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.authenticated = False
@@ -247,7 +309,13 @@ with st.sidebar:
 # ============================================================================
 
 st.title("🛒 Sistema de Pedidos (PostgreSQL)")
-st.markdown(f"**Bem-vindo, {st.session_state.user_data['full_name']}!**")
+
+user_data = st.session_state.user_data
+if user_data['role'] == 'admin':
+    st.markdown(f"**Bem-vindo, {user_data['full_name']}! (Administrador)**")
+    st.info("🔑 Como administrador, você tem acesso total ao sistema e pode acessar tanto gestão quanto pedidos.")
+else:
+    st.markdown(f"**Bem-vindo, {user_data['full_name']}!**")
 
 # Dashboard
 st.header("📊 Dashboard")

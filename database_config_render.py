@@ -19,13 +19,19 @@ def get_db_config():
         # Tentar usar secrets do Streamlit (para produção)
         if hasattr(st, 'secrets') and 'db' in st.secrets:
             print("[OK] Usando configurações do Streamlit secrets")
-            return {
+            config = {
                 'host': st.secrets['db']['host'],
                 'port': st.secrets['db']['port'],
                 'database': st.secrets['db']['name'],
                 'user': st.secrets['db']['user'],
                 'password': st.secrets['db']['password']
             }
+            # Adicionar sslmode se disponível
+            if 'sslmode' in st.secrets['db']:
+                config['sslmode'] = st.secrets['db']['sslmode']
+            else:
+                config['sslmode'] = 'require'
+            return config
     except Exception as e:
         print(f"[ERRO] Erro ao carregar secrets do Streamlit: {e}")
     

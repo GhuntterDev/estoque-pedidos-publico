@@ -1,7 +1,7 @@
 # estoque_pedidos_postgresql.py — Sistema de Pedidos com PostgreSQL
 # Interface para funcionários das lojas fazerem pedidos usando PostgreSQL
 # Funcionalidades: Ver Estoque, Fazer Pedidos, Acompanhar Status, Histórico
-# Atualizado: Correção do usuário Ghuntter para funcionar como admin
+# Atualizado: Versão otimizada com todas as funcionalidades do Google Sheets
 
 import os, sys
 import json
@@ -20,6 +20,21 @@ from database_config_render import (
 )
 
 sys.stdout.reconfigure(line_buffering=True)
+
+# CSS para centralizar conteúdo das tabelas
+st.markdown("""
+<style>
+    .stDataFrame table {
+        text-align: center !important;
+    }
+    .stDataFrame th {
+        text-align: center !important;
+    }
+    .stDataFrame td {
+        text-align: center !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 def log(msg: str):
     print(msg, flush=True)
@@ -53,7 +68,7 @@ def now_br() -> dt.datetime:
 # ============================================================================
 
 def get_current_stock_for_orders():
-    """Obtém estoque atual do PostgreSQL"""
+    """Obtém estoque atual do PostgreSQL com cache"""
     try:
         stock_data = get_current_stock_for_orders()
         log(f"✅ {len(stock_data)} produtos carregados do PostgreSQL")
@@ -67,7 +82,7 @@ def get_current_stock_for_orders():
                 'EAN': ean or '',
                 'Referência': reference or '',
                 'Produto': name,
-                'Setor': sector_name,
+                'Setor': sector_name or 'Sem Setor',
                 'Quantidade': total_quantity,
                 'Fornecedor': 'CD',  # Assumir que vem do CD
                 'Última Atualização': now_br().strftime("%d/%m/%Y %H:%M")
@@ -92,7 +107,7 @@ def create_order_in_postgresql(store, products_data):
                     cur.execute("""
                         SELECT id FROM products 
                         WHERE reference = %s OR ean = %s
-                    """, (product['referencia'], product['referencia']))
+                    """, (product.get('reference', ''), product.get('ean', '')))
                     product_row = cur.fetchone()
                     
                     if product_row:
@@ -101,18 +116,18 @@ def create_order_in_postgresql(store, products_data):
                         # Criar produto se não existir
                         product_id = create_product(
                             ean=product.get('ean', ''),
-                            reference=product['referencia'],
-                            name=product['produto'],
-                            sector=product['setor']
+                            reference=product.get('reference', ''),
+                            name=product.get('name', ''),
+                            sector=product.get('sector', 'Geral')
                         )
             
             # Criar pedido
             order_id = create_order(
                 store=store,
                 product_id=product_id,
-                quantity=product['quantidade'],
+                quantity=product.get('quantity', 1),
                 requested_by=store,  # Assumir que a loja está fazendo o pedido
-                notes=f"Pedido automático - {len(products_data)} produtos"
+                notes=product.get('obs', f"Pedido automático - {len(products_data)} produtos")
             )
             order_ids.append(order_id)
         
@@ -135,18 +150,18 @@ def get_orders_by_store(store):
             
             order_item = {
                 'ID': order_id,
-                'Data': created_at.strftime("%d/%m/%Y") if created_at else '',
-                'Hora': created_at.strftime("%H:%M") if created_at else '',
-                'Loja': store_name,
-                'Produto': product_name,
-                'Referência': reference,
+                'Data/Hora': created_at.strftime("%d/%m/%Y %H:%M:%S") if created_at else '',
+                'Responsável': requested_by,
+                'Referência': reference or '',
                 'EAN': ean or '',
-                'Quantidade Solicitada': requested_qty,
-                'Quantidade Entregue': delivered_qty,
-                'Quantidade Pendente': pending_qty,
+                'Produto': product_name,
+                'Quantidade': requested_qty,
+                'Loja': store_name,
+                'Setor': 'Geral',  # Assumir setor geral
                 'Status': status,
-                'Solicitado por': requested_by,
-                'Observações': notes or ''
+                'Finalizado em': updated_at.strftime("%d/%m/%Y %H:%M") if updated_at and status == 'ATENDIDO' else '',
+                'Responsável Saída': requested_by if status == 'ATENDIDO' else '',
+                'Obs': notes or ''
             }
             orders_list.append(order_item)
         
@@ -156,13 +171,97 @@ def get_orders_by_store(store):
         log(f"❌ ERRO ao carregar pedidos da loja {store}: {e}")
         return []
 
-# ============================================================================
-# SISTEMA DE AUTENTICAÇÃO
-# ============================================================================
-# authenticate_user já está importado de database_config_render
+def get_sectors():
+    """Obtém setores do PostgreSQL"""
+    try:
+        sectors = db_sectors()
+        return sectors if sectors else ["Geral", "Brinquedos", "Papelaria", "Decoração"]
+    except Exception as e:
+        log(f"❌ ERRO ao obter setores: {e}")
+        return ["Geral", "Brinquedos", "Papelaria", "Decoração"]
+
+def group_orders_by_session(orders_data):
+    """Agrupa pedidos por data/hora e responsável para formar sessões de pedido"""
+    if not orders_data:
+        return []
+    
+    # Agrupar por data/hora e responsável
+    grouped = {}
+    for order in orders_data:
+        # Usar data/hora e responsável como chave do grupo
+        data_hora = order.get('Data/Hora', '')
+        responsavel = order.get('Responsável', '')
+        loja = order.get('Loja', '')
+        
+        # Criar chave única para o grupo (arredondar segundos para agrupar melhor)
+        try:
+            if data_hora and '/' in data_hora:
+                # Formato: DD/MM/YYYY HH:MM:SS
+                date_part, time_part = data_hora.split(' ')
+                if ':' in time_part:
+                    h, m, s = time_part.split(':')
+                    # Arredondar segundos para agrupar pedidos do mesmo minuto
+                    rounded_time = f"{h}:{m}:00"
+                    group_key = f"{date_part} {rounded_time}|{responsavel}|{loja}"
+                else:
+                    group_key = f"{data_hora}|{responsavel}|{loja}"
+            else:
+                group_key = f"{data_hora}|{responsavel}|{loja}"
+        except:
+            group_key = f"{data_hora}|{responsavel}|{loja}"
+        
+        if group_key not in grouped:
+            grouped[group_key] = {
+                'Data/Hora': data_hora,
+                'Responsável': responsavel,
+                'Loja': loja,
+                'Status': order.get('Status', 'Pendente'),
+                'Finalizado em': order.get('Finalizado em', ''),
+                'Responsável Saída': order.get('Responsável Saída', ''),
+                'items': [],
+                'total_quantity': 0
+            }
+        
+        # Adicionar item ao grupo
+        grouped[group_key]['items'].append({
+            'Produto': order.get('Produto', ''),
+            'Referência': order.get('Referência', ''),
+            'EAN': order.get('EAN', ''),
+            'Quantidade': order.get('Quantidade', 0),
+            'Setor': order.get('Setor', ''),
+            'Status': order.get('Status', 'Pendente'),
+            'Obs': order.get('Obs', '')
+        })
+        
+        # Somar quantidade total
+        try:
+            qty = int(order.get('Quantidade', 0))
+            grouped[group_key]['total_quantity'] += qty
+        except:
+            pass
+    
+    # Converter para lista de grupos
+    grouped_orders = []
+    for group_key, group_data in grouped.items():
+        grouped_orders.append({
+            'Data/Hora': group_data['Data/Hora'],
+            'Responsável': group_data['Responsável'],
+            'Loja': group_data['Loja'],
+            'Status': group_data['Status'],
+            'Finalizado em': group_data['Finalizado em'],
+            'Responsável Saída': group_data['Responsável Saída'],
+            'Produtos': len(group_data['items']),
+            'Total Itens': group_data['total_quantity'],
+            'items': group_data['items']
+        })
+    
+    # Ordenar por data/hora (mais recente primeiro)
+    grouped_orders.sort(key=lambda x: x['Data/Hora'], reverse=True)
+    
+    return grouped_orders
 
 # ============================================================================
-# INTERFACE PRINCIPAL
+# MAIN APPLICATION
 # ============================================================================
 
 # Sistema de autenticação
@@ -202,15 +301,16 @@ if not st.session_state.authenticated:
                     if not login or not password:
                         st.error("Por favor, preencha todos os campos.")
                     else:
-                        success, user_data = authenticate_user(login, password)
-                        
-                        if success:
-                            st.session_state.authenticated = True
-                            st.session_state.user_data = user_data
-                            st.success("Login realizado com sucesso!")
-                            st.rerun()
-                        else:
-                            st.error("Usuário ou senha incorretos.")
+                        with st.spinner("Autenticando..."):
+                            success, user_data = authenticate_user(login, password)
+                            
+                            if success and user_data:
+                                st.session_state.authenticated = True
+                                st.session_state.user_data = user_data
+                                st.success("Login realizado com sucesso!")
+                                st.rerun()
+                            else:
+                                st.error("Usuário ou senha incorretos.")
         
         with tab2:
             with st.form("create_account_form"):
@@ -279,12 +379,6 @@ if not st.session_state.authenticated:
 
 st.set_page_config(page_title="MDC — Pedidos", page_icon="🛒", layout="wide")
 
-if "sectors" not in st.session_state:
-    try:
-        st.session_state.sectors = db_sectors()
-    except Exception as e:
-        st.session_state.sectors = ["Geral", "Brinquedos", "Papelaria", "Decoração"]
-
 with st.sidebar:
     st.title("MDC — Pedidos")
     
@@ -309,315 +403,593 @@ with st.sidebar:
         st.session_state.authenticated = False
         st.session_state.user_data = None
         st.rerun()
+    
+    st.markdown("---")
+    
+    # Monta o menu
+    pages = ["Estoque Disponível", "Novo Pedido", "Meus Pedidos"]
+    page = st.radio("Módulo", pages, index=0)
+    st.markdown("---")
+    st.caption("© 2025 - Sistema PostgreSQL")
 
 # ============================================================================
-# PÁGINA PRINCIPAL
+# ESTOQUE DISPONÍVEL
 # ============================================================================
-
-st.title("🛒 Sistema de Pedidos (PostgreSQL)")
-
-user_data = st.session_state.user_data
-if user_data['role'] == 'admin':
-    st.markdown(f"**Bem-vindo, {user_data['full_name']}! (Administrador)**")
-    st.info("🔑 Como administrador, você tem acesso total ao sistema e pode acessar tanto gestão quanto pedidos.")
-else:
-    st.markdown(f"**Bem-vindo, {user_data['full_name']}!**")
-
-# Dashboard
-st.header("📊 Dashboard")
-
-try:
-    # Carregar dados do PostgreSQL
-    stock = get_current_stock_for_orders()
-    orders = get_orders_by_store(st.session_state.user_data['store'])
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Produtos Disponíveis", len(stock))
-    
-    with col2:
-        active_orders = len([o for o in orders if o.get('Status', '').upper() == 'PENDENTE'])
-        st.metric("Pedidos Pendentes", active_orders)
-    
-    with col3:
-        total_quantity = sum([s.get('Quantidade', 0) for s in stock])
-        st.metric("Quantidade Total", total_quantity)
-    
-    with col4:
-        sectors_count = len(set([s.get('Setor', '') for s in stock if s.get('Setor')]))
-        st.metric("Setores", sectors_count)
-    
-except Exception as e:
-    st.error(f"Erro ao carregar dados: {str(e)}")
-    st.info("Verifique a conexão com o PostgreSQL")
-
-# Seções do sistema
-st.markdown("---")
-
-tab1, tab2, tab3, tab4 = st.tabs(["🛒 Novo Pedido", "📋 Meus Pedidos", "📦 Estoque Disponível", "⚙️ Configurações"])
-
-with tab1:
-    st.header("🛒 Novo Pedido")
+if page == "Estoque Disponível":
+    st.header("📦 Estoque Disponível para Pedidos")
     
     try:
-        # Carregar estoque atual
-        stock = get_current_stock_for_orders()
+        stock_data = get_current_stock_for_orders()
         
-        if stock:
-            st.subheader("📦 Produtos Disponíveis")
+        if stock_data:
+            # Criar DataFrame
+            df_stock = pd.DataFrame(stock_data)
             
-            # Criar DataFrame para exibição
-            df_stock = pd.DataFrame(stock)
+            # Estatísticas do estoque (antes dos filtros)
+            if not df_stock.empty:
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    total_items = len(df_stock)
+                    st.metric("Total de Itens", total_items)
+                
+                with col2:
+                    if 'Quantidade' in df_stock.columns:
+                        total_quantity = df_stock["Quantidade"].sum()
+                        st.metric("Quantidade Total", total_quantity)
+                
+                with col3:
+                    if 'Quantidade' in df_stock.columns:
+                        low_stock = len(df_stock[df_stock["Quantidade"] < 10])
+                        st.metric("Estoque Baixo (<10)", low_stock)
+                
+                with col4:
+                    if 'Setor' in df_stock.columns:
+                        sectors_count = df_stock["Setor"].nunique()
+                        st.metric("Setores", sectors_count)
+                
+                st.markdown("---")
             
             # Filtros
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                setor_filter = st.selectbox("Filtrar por Setor:", ["Todos"] + list(df_stock['Setor'].unique()))
+                if 'Setor' in df_stock.columns:
+                    sector_filter = st.selectbox("Filtrar por Setor", ["Todos"] + list(df_stock["Setor"].unique()))
+                    if sector_filter != "Todos":
+                        df_stock = df_stock[df_stock["Setor"] == sector_filter]
             
             with col2:
-                produto_filter = st.text_input("Buscar Produto:", placeholder="Digite o nome do produto...")
+                search_term = st.text_input("Buscar Produto", placeholder="Digite nome, EAN ou referência")
+                if search_term and 'Produto' in df_stock.columns:
+                    # Converter para string antes de usar .str.contains() para evitar erro com valores numéricos
+                    mask = (df_stock["Produto"].astype(str).str.contains(search_term, case=False, na=False) |
+                           df_stock["EAN"].astype(str).str.contains(search_term, case=False, na=False) |
+                           df_stock["Referência"].astype(str).str.contains(search_term, case=False, na=False))
+                    df_stock = df_stock[mask]
             
             with col3:
-                min_stock = st.number_input("Estoque Mínimo:", min_value=0, value=0)
+                min_stock = st.number_input("Estoque Mínimo", min_value=0, value=0)
+                if min_stock > 0 and 'Quantidade' in df_stock.columns:
+                    df_stock = df_stock[df_stock["Quantidade"] >= min_stock]
             
-            # Aplicar filtros
-            filtered_df = df_stock.copy()
+            # Mostrar resultados
+            st.subheader(f"Produtos Disponíveis ({len(df_stock)} itens)")
             
-            if setor_filter != "Todos":
-                filtered_df = filtered_df[filtered_df['Setor'] == setor_filter]
-            
-            if produto_filter:
-                filtered_df = filtered_df[filtered_df['Produto'].str.contains(produto_filter, case=False, na=False)]
-            
-            filtered_df = filtered_df[filtered_df['Quantidade'] >= min_stock]
-            
-            # Exibir produtos filtrados
-            if not filtered_df.empty:
-                st.dataframe(filtered_df, use_container_width=True)
+            if not df_stock.empty:
+                # Inicializar carrinho se não existir
+                if 'carrinho' not in st.session_state:
+                    st.session_state.carrinho = {}
                 
-                # Formulário de pedido
-                st.markdown("---")
-                st.subheader("📝 Criar Novo Pedido")
+                # Criar DataFrame com coluna de seleção (sem quantidade)
+                df_display = df_stock.copy()
+                df_display['Selecionar'] = False
+                df_display['Qtd Pedido'] = 1  # Inicializar coluna de quantidade
                 
-                # Carrinho de compras
-                if "carrinho" not in st.session_state:
-                    st.session_state.carrinho = []
+                # Converter colunas numéricas para string para evitar erro de tipo
+                df_display['Referência'] = df_display['Referência'].astype(str)
+                df_display['EAN'] = df_display['EAN'].astype(str)
                 
-                # Seleção de produtos
-                col1, col2, col3 = st.columns([3, 1, 1])
+                # Atualizar seleções baseadas no carrinho
+                for idx, row in df_display.iterrows():
+                    product_key = f"{row.get('EAN', '')}_{idx}"
+                    if product_key in st.session_state.carrinho:
+                        df_display.at[idx, 'Selecionar'] = True
+                        df_display.at[idx, 'Qtd Pedido'] = st.session_state.carrinho[product_key].get('qty_pedido', 1)
                 
-                with col1:
-                    selected_product = st.selectbox(
-                        "Selecionar Produto:",
-                        options=filtered_df.index,
-                        format_func=lambda x: f"{filtered_df.loc[x, 'Produto']} - {filtered_df.loc[x, 'Referência']} (Estoque: {filtered_df.loc[x, 'Quantidade']})"
+                # Preparar colunas - sempre incluir coluna de quantidade na última posição
+                columns_to_show = ['Selecionar', 'Produto', 'Referência', 'EAN', 'Setor', 'Quantidade', 'Fornecedor', 'Qtd Pedido']
+                
+                st.markdown("**📦 Produtos Disponíveis**")
+                
+                edited_df = st.data_editor(
+                        df_display[columns_to_show],
+                        width='stretch',
+                        num_rows="dynamic",
+                        column_config={
+                        "Selecionar": st.column_config.CheckboxColumn(
+                            "🛒",
+                            help="Selecionar para adicionar ao carrinho",
+                            default=False,
+                        ),
+                        "Produto": st.column_config.TextColumn(
+                            "Produto",
+                            width="medium",
+                        ),
+                        "Referência": st.column_config.TextColumn(
+                            "Ref",
+                            width="small",
+                        ),
+                        "EAN": st.column_config.TextColumn(
+                            "EAN",
+                            width="small",
+                        ),
+                        "Setor": st.column_config.TextColumn(
+                            "Setor",
+                            width="small",
+                        ),
+                        "Quantidade": st.column_config.NumberColumn(
+                            "Estoque",
+                            width="small",
+                            disabled=True,
+                        ),
+                        "Fornecedor": st.column_config.TextColumn(
+                            "Fornecedor",
+                            width="medium",
+                        ),
+                        "Qtd Pedido": st.column_config.NumberColumn(
+                            "Qtd Pedido",
+                            help="Quantidade para pedido (máx = Estoque)",
+                            min_value=1,
+                            step=1,
+                            default=1,
+                            width="small",
+                        ),
+                        },
+                        hide_index=True,
+                        key="stock_editor"
                     )
                 
-                with col2:
-                    quantidade = st.number_input("Quantidade:", min_value=1, value=1)
+                # Atualizar carrinho baseado nas seleções
+                col_btn1, col_btn2 = st.columns([1, 1])
                 
-                with col3:
-                    if st.button("➕ Adicionar ao Carrinho", use_container_width=True):
-                        if selected_product is not None:
-                            produto = filtered_df.loc[selected_product]
+                with col_btn1:
+                    if st.button("🛒 Atualizar Carrinho", type="primary", width='stretch'):
+                        try:
+                            # Limpar carrinho atual
+                            st.session_state.carrinho = {}
                             
-                            # Verificar se já está no carrinho
-                            existing_item = None
-                            for item in st.session_state.carrinho:
-                                if item['referencia'] == produto['Referência']:
-                                    existing_item = item
-                                    break
+                            # Adicionar itens selecionados
+                            selected_products = edited_df[edited_df['Selecionar'] == True]
                             
-                            if existing_item:
-                                existing_item['quantidade'] += quantidade
-                                st.success(f"Quantidade atualizada para {existing_item['quantidade']} unidades")
+                            if not selected_products.empty:
+                                # Limitar processamento para evitar problemas de performance
+                                max_items = 50  # Limite de 50 itens por vez
+                                if len(selected_products) > max_items:
+                                    st.warning(f"⚠️ Muitos produtos selecionados ({len(selected_products)}). Processando apenas os primeiros {max_items}.")
+                                    selected_products = selected_products.head(max_items)
+                                
+                                added_items = 0
+                                errors = []
+                                
+                                for idx, row in selected_products.iterrows():
+                                    try:
+                                        # Verificar se realmente está selecionado
+                                        if not row.get('Selecionar', False):
+                                            continue
+                                            
+                                        original_row = df_stock.iloc[idx]
+                                        product_key = f"{original_row.get('EAN', '')}_{idx}"
+                                        
+                                        # Obter a quantidade da coluna 'Qtd Pedido' se existir
+                                        qty_pedido = int(row.get('Qtd Pedido', 1))
+                                        max_qty = int(original_row.get('Quantidade', 1))
+                                        
+                                        # Validar quantidade (não pode exceder estoque)
+                                        if qty_pedido > max_qty:
+                                            errors.append(f"❌ {original_row.get('Produto', '')}: Qtd {qty_pedido} > Estoque {max_qty}")
+                                            continue
+                                        
+                                        # Validar se EAN está preenchido
+                                        ean_value = str(original_row.get('EAN', '')).strip()
+                                        if not ean_value:
+                                            errors.append(f"❌ {original_row.get('Produto', '')}: EAN não preenchido")
+                                            continue
+                                        
+                                        st.session_state.carrinho[product_key] = {
+                                            'EAN': str(original_row.get('EAN', '')),
+                                            'Referência': str(original_row.get('Referência', '')),
+                                            'Produto': str(original_row.get('Produto', '')),
+                                            'Setor': str(original_row.get('Setor', '')),
+                                            'Quantidade': max_qty,
+                                            'Fornecedor': str(original_row.get('Fornecedor', '')),
+                                            'qty_pedido': qty_pedido
+                                        }
+                                        added_items += 1
+                                        
+                                    except Exception as e:
+                                        errors.append(f"❌ Erro ao processar {original_row.get('Produto', '')}: {str(e)}")
+                                        continue
+                                
+                                # Mostrar resultados
+                                if added_items > 0:
+                                    st.success(f"🛒 {added_items} item(s) adicionado(s) ao carrinho!")
+                                
+                                if errors:
+                                    for error in errors[:5]:  # Mostrar apenas os primeiros 5 erros
+                                        st.error(error)
+                                    if len(errors) > 5:
+                                        st.warning(f"... e mais {len(errors) - 5} erros")
                             else:
-                                st.session_state.carrinho.append({
-                                    'referencia': produto['Referência'],
-                                    'produto': produto['Produto'],
-                                    'setor': produto['Setor'],
-                                    'quantidade': quantidade,
-                                    'estoque_disponivel': produto['Quantidade']
-                                })
-                                st.success(f"Produto adicionado ao carrinho!")
-                            st.rerun()
-                
-                # Exibir carrinho
-                if st.session_state.carrinho:
-                    st.markdown("---")
-                    st.subheader("🛒 Carrinho de Compras")
-                    
-                    carrinho_df = pd.DataFrame(st.session_state.carrinho)
-                    st.dataframe(carrinho_df, use_container_width=True)
-                    
-                    # Botões do carrinho
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        if st.button("🗑️ Limpar Carrinho", use_container_width=True):
-                            st.session_state.carrinho = []
-                            st.rerun()
-                    
-                    with col2:
-                        if st.button("✏️ Editar Quantidades", use_container_width=True):
-                            st.session_state.edit_carrinho = True
-                            st.rerun()
-                    
-                    with col3:
-                        observacoes = st.text_area("Observações:", placeholder="Observações do pedido...")
+                                st.info("ℹ️ Nenhum produto selecionado")
+                                
+                        except Exception as e:
+                            st.error(f"❌ Erro ao atualizar carrinho: {str(e)}")
                         
-                        if st.button("📤 Enviar Pedido", use_container_width=True, type="primary"):
-                            if st.session_state.carrinho:
-                                success = create_order_in_postgresql(st.session_state.user_data['store'], st.session_state.carrinho)
-                                if success:
-                                    st.success("✅ Pedido enviado com sucesso!")
-                                    st.session_state.carrinho = []
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Erro ao enviar pedido. Tente novamente.")
-                            else:
-                                st.error("❌ Carrinho vazio!")
+                        # Usar st.rerun() apenas se necessário
+                        if 'carrinho' in st.session_state and st.session_state.carrinho:
+                            st.rerun()
                 
-                # Edição do carrinho
-                if st.session_state.get("edit_carrinho", False):
-                    st.markdown("---")
-                    st.subheader("✏️ Editar Quantidades")
+                    with col_btn2:
+                        if st.button("🗑️ Limpar Seleções", type="secondary", width='stretch'):
+                            try:
+                                st.session_state.carrinho = {}
+                                st.success("🗑️ Carrinho limpo com sucesso!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Erro ao limpar carrinho: {str(e)}")
+            else:
+                st.info("📦 Nenhum produto disponível com os filtros aplicados.")
+            
+            # Seção do Carrinho
+            if st.session_state.carrinho:
+                st.markdown("---")
+                st.subheader("🛒 Carrinho de Pedidos")
+                
+                # Centralizar seção do carrinho
+                col_cart_left, col_cart_center, col_cart_right = st.columns([1, 8, 1])
+                with col_cart_center:
+                    # Mostrar itens do carrinho
+                    total_carrinho = 0
+                    total_itens_carrinho = 0
                     
-                    for i, item in enumerate(st.session_state.carrinho):
-                        col1, col2, col3 = st.columns([3, 1, 1])
+                    for product_key, item in st.session_state.carrinho.items():
+                        col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
                         
                         with col1:
-                            st.write(f"**{item['produto']}** - {item['referencia']}")
+                            st.write(f"**{item['Produto']}**")
+                            st.caption(f"EAN: {item['EAN']} | Ref: {item['Referência']}")
                         
                         with col2:
-                            new_qty = st.number_input(
-                                "Quantidade:", 
-                                min_value=0, 
-                                value=item['quantidade'],
-                                key=f"edit_qty_{i}"
-                            )
-                            if new_qty != item['quantidade']:
-                                st.session_state.carrinho[i]['quantidade'] = new_qty
+                            st.write(f"Setor: {item['Setor']}")
+                            st.caption(f"Fornecedor: {item['Fornecedor']}")
                         
                         with col3:
-                            if st.button("❌", key=f"remove_{i}"):
-                                st.session_state.carrinho.pop(i)
+                            st.write(f"Estoque: {item['Quantidade']}")
+                            st.write(f"**Qtd Pedido: {item['qty_pedido']}**")
+                        
+                        with col4:
+                            if st.button("❌", key=f"remove_{product_key}", help="Remover do carrinho"):
+                                del st.session_state.carrinho[product_key]
                                 st.rerun()
+                        
+                        total_carrinho += item['qty_pedido']
+                        total_itens_carrinho += 1
+                
+                    # Resumo do carrinho
+                    st.markdown("---")
+                    col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+                
+                    with col1:
+                        st.metric("Itens no Carrinho", total_itens_carrinho)
                     
-                    if st.button("✅ Concluir Edição", use_container_width=True):
-                        st.session_state.edit_carrinho = False
-                        st.rerun()
-            else:
-                st.info("Nenhum produto encontrado com os filtros aplicados.")
+                    with col2:
+                        st.metric("Quantidade Total", total_carrinho)
+                    
+                    with col3:
+                        if st.button("🗑️ Limpar Carrinho", type="secondary"):
+                            st.session_state.carrinho = {}
+                            st.rerun()
+                    
+                    with col4:
+                        if st.button("📝 Criar Pedido", type="primary"):
+                            # Criar pedido
+                            try:
+                                # Preparar dados do pedido
+                                products_data = []
+                                for product_key, item in st.session_state.carrinho.items():
+                                    products_data.append({
+                                        'ean': item['EAN'],
+                                        'reference': item['Referência'],
+                                        'name': item['Produto'],
+                                        'sector': item['Setor'],
+                                        'quantity': item['qty_pedido'],
+                                        'obs': f"Pedido via app - {item['Produto']}"
+                                    })
+                                
+                                # Salvar pedido no PostgreSQL
+                                success = create_order_in_postgresql(st.session_state.user_data['store'], products_data)
+                                
+                                if success:
+                                    st.success(f"✅ Pedido criado com sucesso! {total_itens_carrinho} itens, {total_carrinho} unidades.")
+                                    st.session_state.carrinho = {}  # Limpar carrinho
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Erro ao criar pedido. Tente novamente.")
+                            
+                            except Exception as e:
+                                st.error(f"❌ Erro ao criar pedido: {str(e)}")
+        
         else:
-            st.info("Nenhum produto disponível no estoque.")
-    
+            st.info("📦 Nenhum produto disponível. Entre em contato com o CD.")
+            
     except Exception as e:
-        st.error(f"Erro ao carregar estoque: {str(e)}")
-        st.info("Verifique a conexão com o PostgreSQL")
+        st.error(f"❌ Erro ao carregar estoque: {e}")
+        log(f"ERRO ao carregar estoque: {e}")
 
-with tab2:
+# ============================================================================
+# NOVO PEDIDO
+# ============================================================================
+if page == "Novo Pedido":
+    st.header("🛒 Novo Pedido")
+    st.caption("Preencha as linhas abaixo. Produtos serão criados automaticamente se não existirem.")
+    
+    # Inicializar DataFrame se não existir
+    if "pedido_df" not in st.session_state:
+        st.session_state.pedido_df = pd.DataFrame([{
+                "Produto": "",
+                "Referência": "",
+                "EAN": "",
+                "Quantidade": 1,
+                "Setor": get_sectors()[0] if get_sectors() else "Geral",
+                "Observações": "",
+        } for _ in range(5)])
+    
+    # Editor de dados
+    df_pedido = st.data_editor(
+            st.session_state.pedido_df,
+            num_rows="dynamic",
+            width='stretch',
+            column_config={
+                "Quantidade": st.column_config.NumberColumn(min_value=1, step=1),
+                "Setor": st.column_config.SelectboxColumn(options=get_sectors(), required=True),
+            },
+            key="pedido_editor",
+        )
+    
+    colA, colB, colC = st.columns([1,1,1])
+    if colA.button("➕ Adicionar 5 linhas", key="add5_pedido"):
+            extra = pd.DataFrame([{
+                "Produto": "",
+                "Referência": "",
+                "EAN": "",
+                "Quantidade": 1,
+                "Setor": get_sectors()[0] if get_sectors() else "Geral",
+                "Observações": "",
+            } for _ in range(5)])
+            st.session_state.pedido_df = pd.concat([st.session_state.pedido_df, extra], ignore_index=True)
+            st.rerun()
+    
+    if colB.button("🗑️ Limpar Tabela", key="clear_pedido", type="secondary"):
+        st.session_state.pedido_df = pd.DataFrame([{
+                "Produto": "",
+                "Referência": "",
+                "EAN": "",
+                "Quantidade": 1,
+                "Setor": get_sectors()[0] if get_sectors() else "Geral",
+                "Observações": "",
+            } for _ in range(5)])
+        st.success("Tabela limpa!")
+        st.rerun()
+    
+    if colC.button("🛒 Fazer Pedido em Lote", key="pedido_lote", type="primary"):
+        st.session_state.pedido_df = df_pedido.copy()
+        linhas = df_pedido.to_dict(orient="records")
+        
+        # Validar e coletar produtos válidos
+        produtos_validos = []
+        erros = []
+        
+        for i, row in enumerate(linhas):
+            produto = str(row.get("Produto", "")).strip()
+            referencia = str(row.get("Referência", "")).strip()
+            ean = str(row.get("EAN", "")).strip()
+            quantidade = row.get("Quantidade", 1)
+            setor = str(row.get("Setor", "")).strip()
+            obs = (row.get("Observações", "") or row.get("Obs", "") or row.get("obs", "") or "").strip()
+            
+            # Pular linhas vazias
+            if not produto and not referencia and not ean:
+                continue
+            
+            # Validação obrigatória: EAN deve estar preenchido
+            if not ean:
+                erros.append(f"Linha {i+1}: EAN é obrigatório")
+                continue
+            
+            # Validação mínima
+            if not produto or not setor:
+                erros.append(f"Linha {i+1}: Produto e Setor são obrigatórios")
+                continue
+            
+            # Adicionar à lista de produtos válidos
+            produtos_validos.append({
+                'reference': referencia,
+                'ean': ean,
+                'name': produto,
+                'quantity': quantidade,
+                'sector': setor,
+                'obs': obs
+            })
+        
+        # Mostrar erros se houver
+        if erros:
+            st.warning(f"⚠️ {len(erros)} erro(s) encontrado(s):")
+            for erro in erros:
+                st.warning(f"  • {erro}")
+        
+        # Criar pedido em grupo se houver produtos válidos
+        if produtos_validos:
+            try:
+                success = create_order_in_postgresql(st.session_state.user_data['store'], produtos_validos)
+                if success:
+                    st.success(f"✅ Pedido em grupo criado com sucesso! ({len(produtos_validos)} produtos)")
+                    # Limpar tabela após sucesso
+                    st.session_state.pedido_df = pd.DataFrame([{
+                        "Produto": "",
+                        "Referência": "",
+                        "EAN": "",
+                        "Quantidade": 1,
+                        "Setor": get_sectors()[0] if get_sectors() else "Geral",
+                        "Observações": "",
+                    } for _ in range(5)])
+                    st.rerun()
+                else:
+                    st.error("❌ Erro ao criar pedido em grupo")
+            except Exception as e:
+                st.error(f"❌ Erro ao criar pedido: {str(e)}")
+        elif not erros:
+            st.info("Nenhuma linha válida para processar.")
+
+# ============================================================================
+# MEUS PEDIDOS
+# ============================================================================
+if page == "Meus Pedidos":
     st.header("📋 Meus Pedidos")
     
     try:
-        # Carregar pedidos da loja
-        orders = get_orders_by_store(st.session_state.user_data['store'])
+        # Obter todos os pedidos e filtrar pelo usuário logado
+        user_login = st.session_state.user_data.get('username', '')
+        user_store = st.session_state.user_data.get('store', '')
         
-        if orders:
-            st.subheader("📋 Pedidos Recentes")
-            
-            # Converter para DataFrame
-            df_orders = pd.DataFrame(orders)
-            
-            # Exibir pedidos
-            st.dataframe(df_orders, use_container_width=True)
-            
-            # Estatísticas
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                total_orders = len(orders)
-                st.metric("Total de Pedidos", total_orders)
-            
-            with col2:
-                pending_orders = len([o for o in orders if o.get('Status', '').upper() == 'PENDENTE'])
-                st.metric("Pendentes", pending_orders)
-            
-            with col3:
-                completed_orders = len([o for o in orders if o.get('Status', '').upper() == 'ATENDIDO'])
-                st.metric("Atendidos", completed_orders)
-            
-            with col4:
-                total_items = sum([o.get('Quantidade Solicitada', 0) for o in orders])
-                st.metric("Total de Itens", total_items)
-        else:
-            st.info("Nenhum pedido encontrado para sua loja.")
-    
-    except Exception as e:
-        st.error(f"Erro ao carregar pedidos: {str(e)}")
-        st.info("Verifique a conexão com o PostgreSQL")
-
-with tab3:
-    st.header("📦 Estoque Disponível")
-    
-    try:
-        # Carregar estoque atual
-        stock = get_current_stock_for_orders()
+        log(f"🔍 Buscando pedidos para usuário: {user_login}, loja: {user_store}")
         
-        if stock:
-            df_stock = pd.DataFrame(stock)
+        all_orders = get_orders_by_store(user_store)
+        # Filtrar por responsável (usuário logado) ou por loja (case-insensitive)
+        orders_data = []
+        for order in all_orders:
+            order_responsavel = str(order.get('Responsável', '')).strip()
+            order_loja = str(order.get('Loja', '')).strip()
             
-            st.subheader("📦 Produtos Disponíveis")
-            st.dataframe(df_stock, use_container_width=True)
+            # Se o responsável for o usuário logado OU se a loja for a mesma
+            if (order_responsavel.lower() == user_login.lower()) or (order_loja.lower() == user_store.lower()):
+                orders_data.append(order)
+        
+        log(f"📋 Itens de pedidos encontrados para {user_login}: {len(orders_data)}")
+        
+        if orders_data:
+            # Agrupar pedidos por sessão (data/hora + responsável)
+            grouped_orders = group_orders_by_session(orders_data)
+            log(f"📦 Pedidos agrupados: {len(grouped_orders)} sessões")
             
-            # Estatísticas
+            # Criar DataFrame dos pedidos agrupados
+            df_orders = pd.DataFrame(grouped_orders)
+            
+            # Filtros
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                st.metric("Total de Produtos", len(df_stock))
+                if 'Status' in df_orders.columns:
+                    # Normalizar status para opções consistentes
+                    def norm_status(s):
+                        return str(s or '').strip().title()
+                    normalized_status = df_orders['Status'].apply(norm_status)
+                    df_orders['Status'] = normalized_status
+                    status_options = ["Todos"] + sorted(list(df_orders["Status"].unique()))
+                    status_filter = st.selectbox("Filtrar por Status", status_options, index=0)
+                    if status_filter != "Todos":
+                        df_orders = df_orders[df_orders["Status"] == status_filter]
             
             with col2:
-                total_quantity = df_stock['Quantidade'].sum()
-                st.metric("Quantidade Total", total_quantity)
+                if 'Produto' in df_orders.columns:
+                    search_term = st.text_input("Buscar Produto", placeholder="Nome, EAN ou referência")
+                    if search_term:
+                        # Buscar em produto, EAN e referência - converter para string primeiro
+                        mask = (df_orders["Produto"].astype(str).str.contains(search_term, case=False, na=False) |
+                               df_orders["EAN"].astype(str).str.contains(search_term, case=False, na=False) |
+                               df_orders["Referência"].astype(str).str.contains(search_term, case=False, na=False))
+                        df_orders = df_orders[mask]
             
             with col3:
-                low_stock = len(df_stock[df_stock['Quantidade'] < 10])
-                st.metric("Estoque Baixo (<10)", low_stock)
+                if 'Data/Hora' in df_orders.columns:
+                    use_date_filter = st.checkbox("Filtrar por Data de Criação", value=False)
+                    if use_date_filter:
+                        date_filter = st.date_input("Data", value=dt.date.today(), key="meus_pedidos_date")
+                        # Filtrar por data (formato DD/MM/YYYY HH:MM:SS)
+                        df_orders['Data'] = pd.to_datetime(df_orders['Data/Hora'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
+                        df_orders = df_orders[df_orders['Data'].dt.date == date_filter]
             
-            # Alertas de estoque baixo
-            if low_stock > 0:
-                st.warning(f"⚠️ **{low_stock} produto(s) com estoque baixo:**")
-                low_stock_items = df_stock[df_stock['Quantidade'] < 10][['Produto', 'Referência', 'Quantidade', 'Setor']]
-                st.dataframe(low_stock_items, use_container_width=True)
-        else:
-            st.info("Nenhum produto disponível no estoque.")
-    
-    except Exception as e:
-        st.error(f"Erro ao carregar estoque: {str(e)}")
-        st.info("Verifique a conexão com o PostgreSQL")
-
-with tab4:
-    st.header("⚙️ Configurações")
-    
-    st.markdown("### **🔧 Status do Sistema**")
-    st.success("✅ Sistema completo ativo")
-    st.info("PostgreSQL configurado no Render")
-    st.info("🔗 Conexão com PostgreSQL ativa")
-    
-    st.markdown("### **👤 Informações do Usuário**")
-    st.info(f"**Usuário:** {st.session_state.user_data['username']}")
-    st.info(f"**Nome:** {st.session_state.user_data['full_name']}")
-    st.info(f"**Função:** {st.session_state.user_data['role']}")
-    st.info(f"**Loja:** {st.session_state.user_data['store']}")
-    
-    # Teste de conexão
-    if st.button("🔍 Testar Conexão com PostgreSQL"):
-        try:
-            if test_connection():
-                st.success("✅ Conexão com PostgreSQL funcionando!")
+            # Mostrar resultados
+            st.subheader(f"Pedidos ({len(df_orders)} grupos)")
+            
+            if not df_orders.empty:
+                # Lista expansível de pedidos
+                for idx, order in df_orders.iterrows():
+                    data_hora = order.get('Data/Hora', '')
+                    loja = order.get('Loja', '')
+                    status = order.get('Status', 'Pendente')
+                    produtos = order.get('Produtos', 0)
+                    total_itens = order.get('Total Itens', 0)
+                    
+                    # Criar título do grupo
+                    group_title = f"📅 {data_hora} - {loja} - {produtos} produtos - {total_itens} itens"
+                    
+                    # Expandir para mostrar detalhes
+                    with st.expander(group_title, expanded=False):
+                        # Mostrar informações do grupo
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.write(f"**Status:** {status}")
+                        with col2:
+                            st.write(f"**Loja:** {loja}")
+                        with col3:
+                            st.write(f"**Data/Hora:** {data_hora}")
+                        
+                        # Mostrar itens do grupo se disponível
+                        if 'items' in order and order['items']:
+                            st.write("**Itens do Pedido:**")
+                            items_df = pd.DataFrame(order['items'])
+                            st.dataframe(items_df, width='stretch')
+                
+                # Estatísticas
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    total_orders = len(df_orders)
+                    total_items = df_orders['Total Itens'].sum() if 'Total Itens' in df_orders.columns else 0
+                    st.metric("Total de Grupos", total_orders)
+                
+                with col2:
+                    if 'Status' in df_orders.columns:
+                        pending_orders = len(df_orders[df_orders["Status"] == "Pendente"])
+                        st.metric("Pendentes", pending_orders)
+                
+                with col3:
+                    if 'Status' in df_orders.columns:
+                        fulfilled_orders = len(df_orders[df_orders["Status"] == "Finalizado"])
+                        st.metric("Atendidos", fulfilled_orders)
+                
+                with col4:
+                    total_items = df_orders['Total Itens'].sum() if 'Total Itens' in df_orders.columns else 0
+                    st.metric("Total de Itens", total_items)
+                
+                # Exportar dados
+                # Remover colunas desnecessárias para exportação
+                export_columns = [col for col in df_orders.columns if col not in ['Data', 'Responsável', 'items']]
+                csv = df_orders[export_columns].to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Exportar Meus Pedidos",
+                    data=csv,
+                    file_name=f"meus_pedidos_{now_br().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
             else:
-                st.error("❌ Erro na conexão com PostgreSQL")
-        except Exception as e:
-            st.error(f"❌ Erro: {e}")
+                st.info("📋 Nenhum pedido encontrado com os filtros aplicados.")
+        else:
+            st.info("📋 Nenhum pedido encontrado.")
+            
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar pedidos: {e}")
+        log(f"ERRO ao carregar pedidos: {e}")
+
+st.markdown("---")

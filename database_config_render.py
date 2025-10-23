@@ -275,6 +275,34 @@ def test_connection():
 
 # Funções específicas para o sistema de pedidos
 
+def get_current_stock():
+    """Retorna estoque atual com informações dos produtos"""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            # Verificar se há produtos cadastrados
+            cur.execute("SELECT COUNT(*) FROM products")
+            product_count = cur.fetchone()[0]
+            
+            if product_count == 0:
+                return []
+            
+            cur.execute("""
+                SELECT 
+                    cs.id,
+                    p.ean,
+                    p.reference,
+                    p.name,
+                    COALESCE(s.name, 'Sem Setor') as sector_name,
+                    cs.total_quantity,
+                    cs.last_updated
+                FROM current_stock cs
+                JOIN products p ON p.id = cs.product_id
+                LEFT JOIN sectors s ON s.id = p.sector_id
+                WHERE cs.total_quantity > 0
+                ORDER BY p.name
+            """)
+            return cur.fetchall()
+
 def get_current_stock_for_orders():
     """Retorna estoque atual com informações dos produtos para pedidos"""
     with get_connection() as conn:

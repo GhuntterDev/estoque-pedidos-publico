@@ -14,7 +14,7 @@ import pandas as pd
 # Configurações do PostgreSQL
 from database_config_render import (
     init_database, test_connection, get_connection,
-    get_current_stock_for_orders, get_products_by_sector, create_product,
+    get_current_stock, get_products_by_sector, create_product,
     create_order, get_orders_by_store, get_all_orders,
     authenticate_user, create_user, db_units, db_sectors
 )
@@ -68,9 +68,9 @@ def now_br() -> dt.datetime:
 # ============================================================================
 
 def get_current_stock_for_orders():
-    """Obtém estoque atual do PostgreSQL com cache"""
+    """Obtém estoque atual do PostgreSQL usando a mesma função do sistema de gestão"""
     try:
-        stock_data = get_current_stock_for_orders()
+        stock_data = get_current_stock()
         log(f"✅ {len(stock_data)} produtos carregados do PostgreSQL")
         
         stock_list = []
@@ -389,13 +389,6 @@ with st.sidebar:
     if user_data['role'] == 'admin':
         st.info(f"🔑 **Administrador**")
         st.info(f"🏢 **Acesso Total**")
-        
-        # Links para outros sistemas
-        st.markdown("### 🔗 **Acessos Rápidos**")
-        if st.button("📊 Sistema de Gestão", use_container_width=True):
-            st.info("Acesse: https://share.streamlit.io/SEU_USUARIO/estoque.mdc")
-        if st.button("🛒 Sistema de Pedidos", use_container_width=True):
-            st.info("Você já está aqui!")
     else:
         st.info(f"🏪 Loja: **{user_data['store']}**")
     

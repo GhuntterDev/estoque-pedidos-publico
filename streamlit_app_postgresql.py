@@ -98,6 +98,7 @@ def get_current_stock_for_orders():
 def create_order_in_postgresql(store, products_data):
     """Cria um pedido no PostgreSQL"""
     try:
+        from database_config_render import create_product, create_order
         order_ids = []
         
         for product in products_data:
@@ -126,7 +127,7 @@ def create_order_in_postgresql(store, products_data):
                 store=store,
                 product_id=product_id,
                 quantity=product.get('quantity', 1),
-                requested_by=store,  # Assumir que a loja está fazendo o pedido
+                requested_by=st.session_state.user_data.get('username', store),  # Usar usuário logado
                 notes=product.get('obs', f"Pedido automático - {len(products_data)} produtos")
             )
             order_ids.append(order_id)
@@ -141,7 +142,8 @@ def create_order_in_postgresql(store, products_data):
 def get_orders_by_store(store):
     """Obtém pedidos de uma loja específica do PostgreSQL"""
     try:
-        orders_data = get_orders_by_store(store)
+        from database_config_render import get_orders_by_store as db_get_orders_by_store
+        orders_data = db_get_orders_by_store(store)
         log(f"✅ {len(orders_data)} pedidos carregados para {store}")
         
         orders_list = []
